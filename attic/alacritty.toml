@@ -1,0 +1,15 @@
+[window]
+padding = { x = 25, y = 10 }
+startup_mode = "Maximized"
+decorations = "None"
+
+[font]
+size = 16
+
+[cursor]
+style = { shape = "Block" }
+
+[keyboard]
+bindings = [
+  { key = "Back", mods = "Command", chars = "\u0015" },
+]

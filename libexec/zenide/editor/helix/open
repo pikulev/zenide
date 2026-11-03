@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Открыть файл в РАБОТАЮЩЕМ Helix текущей tmux-сессии и переключиться на его окно.
+# Использование: zenide open <файл> [строка]
+# Пейн с hx ищется по pane_current_command — hx не привязан к номеру окна.
+
+set -e
+. "$ZENIDE_LIBEXEC/lib/helix.sh"
+file="${1:-}"
+line="${2:-}"
+case "$file" in *$'\n'*|*$'\r'*) printf 'zenide open: перевод строки в пути не поддерживается\n' >&2; exit 2 ;; esac
+case "$line" in *[!0-9]*) printf 'zenide open: строка должна быть числом\n' >&2; exit 2 ;; esac
+[ -z "$file" ] && exit 0
+
+pane="$(tmux list-panes -s -F '#{pane_id} #{pane_current_command}' 2>/dev/null \
+        | awk '$2 == "hx" { print $1; exit }')"
+
+if [ -z "$pane" ]; then
+    # hx в сессии нет — поднять его в новом окне сразу с файлом. Строку
+    # передаём суффиксом `файл:строка`: helix понимает это в аргументе, и без
+    # него первое открытие из попапа (поиск, blame) теряло номер строки.
+    [ -z "$line" ] || file="$file:$line"
+    tmux new-window -n hx hx -- "$file"
+    exit 0
+fi
+
+# Путь делаем относительным cwd пейна hx (корню проекта):
+# короче строка — короче вспышка «:open …» в командной строке.
+cwd="$(tmux display-message -p -t "$pane" '#{pane_current_path}')"
+case "$file" in "$cwd"/*) file="${file#"$cwd"/}" ;; esac
+
+hx_begin
+hx_cmd "open -- $(hx_quote "$file")"
+# :open лишь ПЕРЕКЛЮЧАЕТ на уже открытый буфер, НЕ перечитывая диск — если файл
+# менялся снаружи (git checkout, lazygit discard, форматер), увидишь СТАРОЕ.
+# :reload перечитывает текущий буфер с диска. Гонки с хуком нет (это одна
+# последовательная инъекция). Безопасно как и в zenide reload: auto-save.focus-lost
+# уже записал правки при уходе из hx (для попап-открытия — см. заметку у флага).
+hx_cmd "reload"
+[ -n "$line" ] && hx_cmd "goto $line"
+
+# Флаг нужен только при настоящем переходе между окнами. Попап над hx
+# не меняет окно: оставленный флаг погасил бы СЛЕДУЮЩИЙ нужный reload.
+win="$(tmux display-message -p -t "$pane" '#{window_id}')"
+current="$(tmux display-message -p '#{window_id}')"
+if [ "$win" != "$current" ]; then
+    tmux set -w -t "$win" @hx_skip_reload 1
+else
+    tmux set -w -t "$win" -u @hx_skip_reload
+fi
+tmux select-pane -t "$pane"
+hx_finish
+tmux select-window -t "$win"

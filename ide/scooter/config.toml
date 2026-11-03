@@ -1,0 +1,19 @@
+# scooter — поиск по проекту в стиле VS Code (окно tmux C-Space /).
+# «e» на результате → файл:строка уходят в РАБОТАЮЩИЙ hx сессии через
+# zenide open (он сам найдёт пейн hx и переключит окно). realpath — потому что
+# scooter отдаёт путь относительно своего cwd, а hx может жить в другом.
+# exit = false: scooter остаётся жить с результатами (окно search персистентно)
+[editor_open]
+# ВАЖНО: %file НЕ оборачивать в свои кавычки — scooter сам шелл-экранирует
+# подстановку; двойное квотирование даёт имя с кавычками внутри → ENOENT
+command = '"${ZENIDE_ROOT:-$HOME/.config/zenide}/bin/zenide" open "$(realpath %file)" %line'
+exit = false
+
+# защита от дефолта «Enter = заменить» (с пустым Replace это тихое УДАЛЕНИЕ
+# найденного): Enter теперь открывает результат в hx, замена — только C-r
+[keys.search.results]
+trigger_replacement = "C-r"
+open_in_editor = ["enter", "e"]
+
+[style]
+true_color = true

@@ -1,0 +1,24 @@
+# Identity — в git.local личного профиля (под .gitignore): в публичной истории
+# не должно быть ни имени, ни почты. Отсутствующий include git молча игнорирует,
+# так что на чистом клоне это не ошибка — просто попросит представиться.
+#
+# Путь литеральный, и иначе нельзя: git не раскрывает переменные окружения в
+# include.path, только `~`. Поэтому здесь якорь профиля, а не $ZENIDE_PROFILE —
+# якорь и существует ради таких случаев.
+[include]
+	path = ~/.config/zenide-profile/git.local
+
+[core]
+	editor = hx
+
+# prune: чистить устаревшие remote-tracking рефы на КАЖДОМ fetch/pull.
+# Лечит вечные «cannot lock ref 'refs/remotes/origin/…'» на чужие
+# удалённые/переименованные ветки (D/F-конфликт из-за застрявшего старого рефа).
+[fetch]
+	prune = true
+	pruneTags = true
+[filter "lfs"]
+	clean = git-lfs clean -- %f
+	smudge = git-lfs smudge -- %f
+	process = git-lfs filter-process
+	required = true

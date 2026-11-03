@@ -1,0 +1,111 @@
+theme = "monokai-custom"
+
+[editor]
+color-modes = true    # красить статусбар в зависимости от режима (normal/insert/select)
+cursorline = true     # якорь для глаза: при скролле взгляд держится за строку
+scrolloff = 4         # контекст вокруг курсора; было 12 — экран дёргался почти
+                      # на каждый j/k, глаза уставали (подобрано 2026-07-10)
+# текст диагностики по умолчанию скрыт (мешает при наборе) — тумблер Alt-d
+end-of-line-diagnostics = "disable"
+
+[editor.inline-diagnostics]
+cursor-line = "disable"
+
+# форма курсора по режимам: в INS — подчёркивание, мгновенно видно режим
+[editor.cursor-shape]
+insert = "bar"
+normal = "block"
+select = "block"
+
+[editor.indent-guides]
+render = true         # вертикальные гайдлайны по уровням отступа
+character = "│"
+skip-levels = 1       # не рисовать самый первый уровень — меньше шума
+
+[editor.gutters]
+# показывать git-изменения слева: +/~/- по каждой строке
+layout = ["diagnostics", "spacer", "line-numbers", "spacer", "diff"]
+
+# авто-сохранение при потере фокуса: ушёл в другое окно/попап tmux — буфер
+# записан. Пока печатаешь — не трогает; :w руками для C-Space D/B не нужен
+# (tmux focus-events on — уже включён в tmux.conf)
+[editor.auto-save]
+focus-lost = true
+
+[editor.statusline]
+left = [
+  "mode",                          # NOR / INS / SEL
+  "file-modification-indicator",   # [+] несохранённые правки: фиксированное
+                                   # место у края — не прыгает за именем файла
+  "spinner",                       # индикатор фоновых задач LSP
+  "version-control",               # текущая git-ветка
+  "file-name",                     # путь к файлу
+  "read-only-indicator",           # [RO] если только чтение
+]
+center = []
+right = [
+  "diagnostics",                   # ошибки/варнинги LSP в файле
+  "selections",                    # «N sel» = счётчик выделений/вхождений
+  "primary-selection-length",      # длина активного выделения (символов)
+  "register",                      # выбранный регистр, если жал "
+  "position",                      # строка:колонка
+  "total-line-numbers",            # всего строк в файле
+  "position-percentage",           # % прокрутки
+  "file-encoding",                 # utf-8 и т.п. (прячется, если дефолт)
+  "file-type",                     # язык/тип файла
+]
+separator = "│"
+
+# короткие подписи режимов вместо длинных дефолтных
+[editor.statusline.mode]
+normal = "NOR"
+insert = "INS"
+select = "SEL"
+
+# ── файловое дерево (встроенный обозреватель) ──────────
+[keys.normal.space]
+e = "file_explorer"                                # дерево от корня проекта
+E = "file_explorer_in_current_buffer_directory"    # дерево от папки текущего файла
+# Space m — превью markdown в браузере (vivify: mermaid, katex; обновление
+# при записи файла — auto-save.focus-lost обновляет превью при уходе из hx).
+# Через скрипт: buffer_name вне cwd приходит с «~», нужна ручная развёртка.
+# Страница при этом не перезагружается, а обновляется мягко (скролл и
+# развёрнутые <details> на месте) — см. config/vivify/soft-reload.js
+m = ':sh ~/.config/helix/viv-open.sh "%{buffer_name}"'
+# Space q: закрыть, записав ПРИ НЕОБХОДИМОСТИ (:update пишет только если
+# буфер менялся — чистый закрывается без записи, mtime не дёргается).
+# Снимает фантомный блок выхода от [+] (правка туда-обратно двигает историю,
+# hx байты не сравнивает). readonly/[scratch] с правками — закрытие не пройдёт
+q = [":update", ":buffer-close"]
+Q = ":buffer-close-others"                         # закрыть все остальные
+
+# Alt-w — тогглнуть мягкий перенос (для чтения логов с длинными строками:
+# горизонтального скролла вью в Helix нет, курсор всегда тянет экран за собой)
+[keys.normal]
+# C-s — сохранить (мышечная память VS Code). Затеняет дефолтный save_selection
+# (ручную закладку в джамплист); авто-закладки при больших прыжках остаются
+C-s = ":write"
+
+A-w = ":toggle soft-wrap.enable"
+
+# Alt-d — показать/скрыть текст диагностики (инлайн на строке курсора + хвосты строк)
+A-d = [
+  ":toggle inline-diagnostics.cursor-line disable warning",
+  ":toggle end-of-line-diagnostics disable hint",
+]
+
+# строчное выделение симметрично: x — вниз, X — вверх (умеют и сжимать,
+# если якорь с другой стороны; дефолтный X = extend_to_line_bounds не жалко)
+x = "select_line_below"
+X = "select_line_above"
+
+# ── прыжки по git-ханкам: курсор в начало строки + центрируем вью,
+#    чтобы экран не «прыгал» непредсказуемо ─────────────
+[keys.normal."]"]
+g = ["goto_next_change", "goto_line_start", "align_view_center"]
+[keys.normal."["]
+g = ["goto_prev_change", "goto_line_start", "align_view_center"]
+
+# C-s и в insert — рефлекс «сохранить не прерывая набор» (режим не меняется)
+[keys.insert]
+C-s = ":write"

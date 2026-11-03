@@ -1,0 +1,37 @@
+#!/usr/bin/env sh
+# Прыжок в инструмент С КОНТЕКСТОМ текущего файла hx (заглавные E/G).
+# Использование: zenide jump files|git
+#
+# Контекст берётся у работающего helix через `zenide ctx` — то есть мост
+# работает в обе стороны: мы не только отдаём файл редактору, но и спрашиваем
+# у него, что сейчас в фокусе.
+#
+# Реализации лежат в jump.d/ по РОЛИ, а не по инструменту: прыжок «встать на
+# этот файл» у каждого TUI делается своими клавишами, общего протокола нет.
+# Поэтому для инструментов без реализации честно деградируем до простого
+# переключения (`zenide window`) и говорим об этом вслух.
+#
+set -u
+
+role="${1:-}"
+
+case "$role" in
+files | yazi)
+    if [ "$ZENIDE_FILES" = yazi ]; then
+        exec "$ZENIDE_LIBEXEC/jump.d/yazi"
+    fi
+    tmux display-message "прыжок на файл есть только для yazi (сейчас: $ZENIDE_FILES)"
+    exec "$ZENIDE_ROOT/bin/zenide" window files
+    ;;
+git)
+    if [ "$ZENIDE_GIT_TUI" = lazygit ]; then
+        exec "$ZENIDE_LIBEXEC/jump.d/git"
+    fi
+    tmux display-message "прыжок на файл есть только для lazygit (сейчас: $ZENIDE_GIT_TUI)"
+    exec "$ZENIDE_ROOT/bin/zenide" window git
+    ;;
+*)
+    printf 'zenide jump: нужна роль — files | git\n' >&2
+    exit 2
+    ;;
+esac

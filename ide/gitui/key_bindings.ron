@@ -1,0 +1,48 @@
+// gitui key bindings — vim-style navigation
+//
+// Docs / full list of possible keys:
+//   src/keys/key_list.rs  →  https://github.com/gitui-org/gitui/blob/master/src/keys/key_list.rs
+//
+// Notes:
+//  * Any key you don't override here keeps gitui's default.
+//  * For Shift-combos use an UPPERCASE Char AND modifiers: "SHIFT",
+//    e.g. exit: Some(( code: Char('Q'), modifiers: "SHIFT")).
+//  * Modifiers: "" | "SHIFT" | "CONTROL" | "ALT" (combine with "|", e.g. "CONTROL|SHIFT").
+//
+// Based on the official gitui vim_style_key_config.ron.
+//
+// IMPORTANT: gitui's DEFAULT help key is `h`, which collides with vim's
+// `move_left: h`. So we move help off `h` onto `?` (what vim users expect).
+(
+    open_help: Some(( code: Char('?'), modifiers: "")),
+
+    // hjkl movement
+    move_left: Some(( code: Char('h'), modifiers: "")),
+    move_right: Some(( code: Char('l'), modifiers: "")),
+    move_up: Some(( code: Char('k'), modifiers: "")),
+    move_down: Some(( code: Char('j'), modifiers: "")),
+
+    // scrolling inside popups / lists
+    popup_up: Some(( code: Char('p'), modifiers: "CONTROL")),
+    popup_down: Some(( code: Char('n'), modifiers: "CONTROL")),
+    page_up: Some(( code: Char('b'), modifiers: "CONTROL")),
+    page_down: Some(( code: Char('f'), modifiers: "CONTROL")),
+    home: Some(( code: Char('g'), modifiers: "")),          // gg-ish → top
+    end: Some(( code: Char('G'), modifiers: "SHIFT")),      // G → bottom
+    shift_up: Some(( code: Char('K'), modifiers: "SHIFT")),
+    shift_down: Some(( code: Char('J'), modifiers: "SHIFT")),
+
+    // editing / staging
+    edit_file: Some(( code: Char('I'), modifiers: "SHIFT")),
+    status_reset_item: Some(( code: Char('U'), modifiers: "SHIFT")),
+    diff_reset_lines: Some(( code: Char('u'), modifiers: "")),
+    diff_stage_lines: Some(( code: Char('s'), modifiers: "")),
+
+    // stashing
+    stashing_save: Some(( code: Char('w'), modifiers: "")),
+    stashing_toggle_index: Some(( code: Char('m'), modifiers: "")),
+    stash_open: Some(( code: Char('l'), modifiers: "")),
+
+    // merge
+    abort_merge: Some(( code: Char('M'), modifiers: "SHIFT")),
+)

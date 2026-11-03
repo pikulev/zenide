@@ -1,0 +1,17 @@
+// gitui key hint symbols (shown in the bottom command bar).
+//
+// This is the ONLY place Nerd Font glyphs apply in gitui — it does not render
+// file-type or branch icons in the tree (unlike lazygit). Keyboard modifier
+// glyphs below assume a Nerd Font is active in your terminal; if any show as
+// tofu (□), replace them with the plain defaults noted in the comments.
+(
+    // macOS-style modifier glyphs (Nerd Font). Defaults: control "^", shift "⇧", alt "⌥".
+    control:   Some("\u{f0634}"),  // 󰘴  nf-md-apple_keyboard_control
+    shift:     Some("\u{f0636}"),  // 󰘶  nf-md-apple_keyboard_shift
+    alt:       Some("\u{f0635}"),  // 󰘵  nf-md-apple_keyboard_option
+
+    // The rest keep gitui's nice Unicode defaults (render in any font):
+    // enter "⏎", esc "⎋", left "←", right "→", up "↑", down "↓",
+    // backspace "⌫", home "⤒", end "⤓", page_up "⇞", page_down "⇟",
+    // tab "⇥", back_tab "⇤", delete "⌦", insert "⎀"
+)

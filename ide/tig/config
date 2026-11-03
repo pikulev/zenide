@@ -1,0 +1,25 @@
+# tig — text-mode git interface
+# Docs: https://jonas.github.io/tig/doc/tigrc.5.html
+#
+# Editor is provided via the TIG_EDITOR env var (see shell/parts/tig.sh),
+# pointing at hx-goto.sh — a wrapper that turns tig's vi-style "+<line> <file>"
+# into what helix expects (file:line), bridging into the running hx inside tmux.
+# The minimal contract for your own tigrc is in CONTRACT next to this file.
+
+# Pass the selected diff line number to the editor (as +<line>); wrapper converts it.
+set editor-line-number = yes
+
+# Show line numbers in these views (interval=1 → number every line).
+# This is exactly what gitui's diff view could not do.
+set diff-view  = line-number:yes,interval=1 text
+set stage-view = line-number:yes,interval=1 text
+set pager-view = line-number:yes,interval=1 text
+set blob-view  = line-number:yes,interval=1 text
+set blame-view = date:default author:full line-number:yes,interval=1 text
+
+# --- General UX ---
+set line-graphics  = utf-8       # smooth box-drawing characters
+set tab-size       = 4
+set ignore-case    = smart-case  # case-insensitive search unless you type an uppercase letter
+set mouse          = yes
+set vertical-split = auto        # side-by-side diff when the window is wide enough

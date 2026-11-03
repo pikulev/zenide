@@ -1,0 +1,243 @@
+#!/usr/bin/env bash
+# Диагностика: что есть, чего нет и ЧТО ИМЕННО из-за этого не работает.
+#
+# Единственная витрина всех трёх механизмов opt-in: слоты (чем занята роль),
+# модули (что включено), возможности среды (что найдено в PATH). Поэтому
+# «почему у меня C-Space / не работает» выясняется здесь, а не чтением кода.
+#
+# Флагов вида «у меня есть bat» в конфиге нет и не будет: наличие тулов — не
+# настройка, а факт, и спрашивать о нём надо систему.
+set -uo pipefail
+
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}"
+fail=0
+ok()   { printf '  \033[32mok\033[0m    %s\n' "$1"; }
+warn() { printf '  \033[33m~\033[0m     %s\n' "$1"; }
+bad()  { printf '  \033[31mнет\033[0m   %s\n' "$1"; fail=1; }
+head_() { printf '\n\033[1m%s\033[0m\n' "$1"; }
+
+have() { command -v "$1" >/dev/null 2>&1; }
+
+c_z=$'\033[32m'       # принадлежит zenide
+c_y=$'\033[33m'       # твоё — трогать нельзя
+c_d=$'\033[38;5;242m' # отсутствует / неважно
+c_n=$'\033[0m'
+
+# ── слоты ──────────────────────────────────────────────
+head_ "слоты (profile/modules.conf)"
+printf '  редактор %-10s  git-TUI %-8s  файлы %-6s  замена %s\n' \
+    "$ZENIDE_EDITOR" "$ZENIDE_GIT_TUI" "$ZENIDE_FILES" "$ZENIDE_SEARCH"
+[ -d "$ZENIDE_LIBEXEC/editor/$ZENIDE_EDITOR" ] \
+    && ok "адаптер редактора есть: editor/$ZENIDE_EDITOR" \
+    || bad "нет адаптера редактора editor/$ZENIDE_EDITOR — open/ctx/reload/goto не работают"
+
+# ── обязательное ───────────────────────────────────────
+head_ "обязательное"
+for t in tmux git fzf; do
+    have "$t" && ok "$t" || bad "$t — без него ядро не работает"
+done
+case "$ZENIDE_EDITOR" in
+helix) have hx && ok "hx (helix)" || bad "hx — весь мост в редактор мёртв" ;;
+esac
+have "$ZENIDE_FILES"   && ok "$ZENIDE_FILES"   || bad "$ZENIDE_FILES — C-Space e/E не работают"
+have "$ZENIDE_GIT_TUI" && ok "$ZENIDE_GIT_TUI" || bad "$ZENIDE_GIT_TUI — C-Space g/G не работают"
+
+# tmux: display-popup появился в 3.2, allow-passthrough в 3.3
+if have tmux; then
+    v="$(tmux -V | sed 's/[^0-9.]//g')"
+    maj="${v%%.*}"; min="${v#*.}"; min="${min%%.*}"
+    if [ "${maj:-0}" -gt 3 ] || { [ "${maj:-0}" -eq 3 ] && [ "${min:-0}" -ge 3 ]; }; then
+        ok "tmux $v (нужен ≥ 3.3: display-popup, allow-passthrough)"
+    else
+        bad "tmux $v слишком старый — нужен ≥ 3.3 (попапы и превью yazi)"
+    fi
+fi
+
+# ── опциональное: что именно отвалится ─────────────────
+head_ "опциональное"
+opt_check() { # opt_check <тул> <что отвалится>
+    have "$1" && ok "$1" || warn "нет $1 → $2"
+}
+opt_check fd       "C-Space o (пикер файлов) не соберёт список"
+opt_check rg       "превью в поиске будет без подсветки"
+opt_check rga      "C-Space / (live-grep) не работает"
+opt_check delta    "дифф и blame без подсветки — попапы D/B станут сырыми"
+opt_check bat      "в blame-попапе колонка кода без подсветки (сам попап работает)"
+opt_check "$ZENIDE_SEARCH" "C-Space R (замена по проекту) не работает"
+opt_check zoxide   "прыжок Z в файловом менеджере"
+
+# ── рантаймы (mise) ────────────────────────────────────
+# Секции НЕТ, если mise не стоит и zenide его конфиг не ставил: ядру mise не
+# нужен ни для чего, и доктор не должен уговаривать чужую машину завести мой
+# менеджер рантаймов. Проверять его надо, только когда он в игре: ломается он
+# МОЛЧА — тремя разными способами, и ни один не видно по `mise ls`.
+mise_cfg="${XDG_CONFIG_HOME:-$HOME/.config}/mise"
+if ! have mise; then
+    # Конфиг слинкован, а бинаря нет — это уже поломка, а не чужой выбор.
+    if [ -L "$mise_cfg" ]; then
+        head_ "рантаймы (mise)"
+        warn "~/.config/mise слинкован, а самого mise нет → ни один тул из него не поставится (brew install mise)"
+    fi
+else
+    head_ "рантаймы (mise)"
+    ok "mise $(mise --version 2>/dev/null | awk '{print $1}')"
+
+    # 1. Шимы на PATH. Без них тул найден в интерактивном шелле и НЕ найден в
+    #    попапе tmux (там PATH не гарантирован) — попап деградирует, а doctor
+    #    при этом зелёный. Ровно эту асимметрию и ловим.
+    shims="${MISE_DATA_DIR:-$HOME/.local/share/mise}/shims"
+    case ":$PATH:" in
+    *":$shims:"*) ok "шимы на PATH → тулы видны и в попапах tmux, и в tests/" ;;
+    *) warn "$shims НЕ на PATH → в попапах tmux тулы могут не найтись (нужна строка с --shims, см. shell/parts/mise.sh)" ;;
+    esac
+
+    # 2. Затенение. `brew shellenv` препендит /opt/homebrew/bin, и тул,
+    #    приехавший в brew зависимостью чужой формулы, перебивает версию из
+    #    mise. Видно только так: сравнением того, что mise СЧИТАЕТ активным,
+    #    с тем, что реально отдаёт PATH.
+    for t in node pnpm; do
+        want="$(mise which "$t" 2>/dev/null)" || want=""
+        got="$(command -v "$t" 2>/dev/null)" || got=""
+        [ -n "$want" ] && [ -n "$got" ] || continue
+        case "$got" in
+        *"/mise/"*) ok "$t → из mise ($("$t" --version 2>/dev/null | tr -d 'v'))" ;;
+        *) warn "$t берётся из $got, а mise держит $want — PATH затенён (source parts/mise.sh ПОСЛЕ brew.sh)" ;;
+        esac
+    done
+
+    # 3. Недоустановленное. Конфиг может перечислять тул, которого на диске
+    #    нет: `mise install` после правки не гоняли, либо он упал по сети.
+    miss="$(mise ls --missing 2>/dev/null | awk 'NF {print $1}' | tr '\n' ' ')"
+    if [ -n "${miss// /}" ]; then
+        warn "в конфиге есть, на диске нет: ${miss% } → mise install && mise reshim"
+    else
+        ok "всё из ~/.config/mise/config.toml установлено"
+    fi
+fi
+
+# ── требования к соседям ───────────────────────────────
+# Это главная причина существования doctor: ядро зависит от НАСТРОЕК чужих
+# конфигов, а молчаливое несовпадение здесь стоит потерянных правок.
+head_ "требования к соседям"
+hx_cfg="$CONFIG_DIR/helix/config.toml"
+if [ -r "$hx_cfg" ]; then
+    if grep -qE '^[[:space:]]*focus-lost[[:space:]]*=[[:space:]]*true' "$hx_cfg"; then
+        ok "helix: auto-save.focus-lost включён (reload не потеряет правки)"
+    else
+        bad "helix: нет auto-save.focus-lost = true — :reload-all может ПОТЕРЯТЬ несохранённое (врежь $ZENIDE_ROOT/ide/helix/CONTRACT.toml)"
+    fi
+else
+    warn "не нашёл $hx_cfg — проверь auto-save.focus-lost руками (см. ide/helix/CONTRACT.toml)"
+fi
+
+yz_cfg="$CONFIG_DIR/yazi/yazi.toml"
+if [ -r "$yz_cfg" ]; then
+    grep -q 'zenide open' "$yz_cfg" \
+        && ok "yazi: открытие файла идёт через zenide open" \
+        || warn "yazi: в yazi.toml нет вызова 'zenide open' — Enter не отдаст файл в hx (врежь $ZENIDE_ROOT/ide/yazi/CONTRACT.toml)"
+fi
+
+# ── затенение: установка есть, но не действует ─────────
+# Худший класс поломки: симлинки на месте, doctor зелёный, а конфиг не
+# загружается вовсе — потому что рядом лежит файл со СТАРШИМ приоритетом.
+# Для человека со своим tmux это норма, а не экзотика: ~/.tmux.conf —
+# классический путь (oh-my-tmux, tpm), и он выигрывает у XDG.
+head_ "затенение"
+shadow() { # shadow <что затеняет> <что затеняется> <последствие>
+    if [ -e "$1" ]; then
+        bad "$1 ЗАТЕНЯЕТ $2 — $3"
+    else
+        ok "$1 нет → $2 действует"
+    fi
+}
+# man tmux, FILES: ищется ~/.tmux.conf ЛИБО $XDG_CONFIG_HOME/tmux/tmux.conf,
+# первый найденный выигрывает. Второй не читается вообще.
+shadow "$HOME/.tmux.conf" "~/.config/tmux/tmux.conf" \
+    "tmux не загрузит zenide НИ ОДНИМ биндом (перенеси настройки или добавь в свой конфиг: source-file ~/.config/tmux/tmux.conf)"
+# ~/.gitconfig старше XDG-пути: fetch.prune, editor и include identity не доедут
+shadow "$HOME/.gitconfig" "~/.config/git/config" \
+    "не доедут fetch.prune, editor = hx и include личного git.local"
+
+# ── установка ──────────────────────────────────────────
+head_ "установка"
+[ -x "$CONFIG_DIR/zenide/bin/zenide" ] && ok "ядро доступно: $CONFIG_DIR/zenide" \
+    || bad "нет рабочего ядра $CONFIG_DIR/zenide (./install.sh --apply)"
+[ -r "$CONFIG_DIR/tmux/tmux.conf" ] && ok "конфиг tmux доступен: $CONFIG_DIR/tmux" \
+    || bad "нет $CONFIG_DIR/tmux/tmux.conf (./install.sh --apply)"
+anchor="$CONFIG_DIR/zenide-profile"
+if [ -L "$anchor" ]; then
+    ok "~/.config/zenide-profile → $(readlink "$anchor") (профиль в клоне)"
+elif [ -d "$anchor" ]; then
+    ok "~/.config/zenide-profile — внешний профиль (переживёт снос клона)"
+else
+    bad "нет якоря ~/.config/zenide-profile — тема и личные бинды не загрузятся (./install.sh)"
+fi
+printf '  %-5s профиль сейчас: %s\n' "" "$ZENIDE_PROFILE"
+# Дрейф схемы профиля. Профиль снаружи клона не виден в диффе апстрима, так
+# что разойтись он может молча — отметка версии и нужна, чтобы это всплыло.
+core_ver="$(cat "$ZENIDE_ROOT/VERSION" 2>/dev/null)"
+prof_ver="$(cat "$ZENIDE_PROFILE/.zenide-version" 2>/dev/null)"
+if [ -z "$prof_ver" ]; then
+    warn "профиль без отметки версии — не узнаю, разошлась ли его схема с ядром ($core_ver)"
+elif [ "$prof_ver" != "$core_ver" ]; then
+    warn "профиль собран под $prof_ver, ядро $core_ver — свери CHANGELOG, потом: echo $core_ver > $ZENIDE_PROFILE/.zenide-version"
+else
+    ok "профиль и ядро одной версии ($core_ver)"
+fi
+have zenide && ok "zenide на PATH" || warn "zenide не на PATH — из шелла зови ~/.config/zenide/bin/zenide"
+
+# ── что сейчас чьё ─────────────────────────────────────
+# Главный экран для того, кто ставит чужой сетап поверх своего. Снимает не
+# риск, а НЕИЗВЕСТНОСТЬ — а боятся обычно именно её: «что эта штука уже
+# сделала с моими конфигами и где теперь моё».
+head_ "что сейчас чьё"
+MANIFEST="${XDG_STATE_HOME:-$HOME/.local/state}/zenide/manifest"
+layers_file="$ZENIDE_ROOT/ide/LAYERS"
+if [ -r "$layers_file" ]; then
+    while IFS='|' read -r tool layer _rest; do
+        tool="$(printf '%s' "$tool" | tr -d '[:space:]')"
+        layer="$(printf '%s' "$layer" | tr -d '[:space:]')"
+        case "$tool" in '' | '#'*) continue ;; esac
+        dst="$CONFIG_DIR/$tool"
+        [ "$tool" = prettier ] && dst="$HOME/.prettierrc"
+        if [ -L "$dst" ]; then
+            case "$(readlink "$dst")" in
+            "$ZENIDE_ROOT"/*) owner="${c_z}zenide${c_n} (симлинк на клон)" ;;
+            *) owner="чужой симлинк → $(readlink "$dst")" ;;
+            esac
+        elif [ -e "$dst" ]; then
+            if [ -r "$MANIFEST" ] && grep -qF "	$dst	" "$MANIFEST" 2>/dev/null; then
+                owner="${c_z}zenide${c_n} (копия, --copy)"
+            else
+                owner="${c_y}твой${c_n} — zenide его не трогает"
+            fi
+        else
+            owner="${c_d}нет${c_n}"
+        fi
+        printf '  %-9s %-8s %s\n' "$tool" "$layer" "$owner"
+    done <"$layers_file"
+else
+    warn "нет $layers_file — не могу сказать, что кому принадлежит"
+fi
+
+# сдвинутое в бэкап: оно существует, и человек должен о нём знать
+baks="$(find "$CONFIG_DIR" "$HOME" -maxdepth 1 -name '*.backup.*' 2>/dev/null)"
+if [ -n "$baks" ]; then
+    printf '\n  %sтвоё, сдвинутое в бэкап%s (вернёт ./install.sh --uninstall):\n' "$c_y" "$c_n"
+    printf '%s\n' "$baks" | sed 's/^/    /'
+fi
+[ -r "$MANIFEST" ] && printf '\n  манифест установки: %s\n' "$MANIFEST" \
+    || printf '\n  %sманифеста нет%s — ставили не через ./install.sh --apply, откат не автоматизирован\n' "$c_d" "$c_n"
+
+# ── модули ─────────────────────────────────────────────
+head_ "модули"
+"$ZENIDE_LIBEXEC/modules" list
+for m in $ZENIDE_MODULES; do
+    chk="$ZENIDE_ROOT/modules/$m/check.sh"
+    [ -x "$chk" ] || continue
+    out="$("$chk" 2>&1)" && ok "$m: $out" || warn "$m: $out"
+done
+
+printf '\n'
+[ "$fail" -eq 0 ] && printf 'Обязательное на месте.\n' || printf 'Есть НЕработающее — см. «нет» выше.\n'
+exit "$fail"

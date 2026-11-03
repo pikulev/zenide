@@ -1,0 +1,1 @@
+alias difft-check='difft --check-only --exit-code'

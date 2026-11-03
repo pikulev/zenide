@@ -1,0 +1,47 @@
+# yazi — основной конфиг.
+
+[mgr]
+show_hidden = true       # показывать скрытые (dot-)файлы
+linemode    = "size_mtime"   # дата модификации + размер (кастом в init.lua)
+
+[preview]
+wrap = "yes"             # мягкий перенос строк в превью файлов
+
+# Enter на текстовом файле → в РАБОТАЮЩИЙ hx этой tmux-сессии (окно с yazi
+# остаётся жить, фокус переключается на окно hx). См. `zenide open`.
+# $ZENIDE_ROOT приезжает из окружения tmux; запасное значение — на случай
+# запуска yazi вне tmux.
+[opener]
+edit = [
+  { run = '"${ZENIDE_ROOT:-$HOME/.config/zenide}/bin/zenide" open "$1"', desc = "Helix (текущий инстанс)", for = "unix" },
+]
+jless = [
+  { run = 'jless "$@"', block = true, desc = "jless (fold/unfold-просмотр)", for = "unix" },
+]
+
+# JSON: Enter — по-прежнему hx, а через O доступен jless (у hx нет фолдинга).
+# матч по расширению — контентная mime-детекция капризна (package-lock.json);
+# mime-правило вторым — для json-файлов без расширения
+[[open.prepend_rules]]
+url = "*.{json,ndjson}"
+use = ["edit", "jless", "reveal"]
+
+[[open.prepend_rules]]
+mime = "application/{json,ndjson}"
+use  = ["edit", "jless", "reveal"]
+
+# YAML — то же самое; по расширению (mime у yaml нестабильный)
+[[open.prepend_rules]]
+url = "*.{yaml,yml}"
+use = ["edit", "jless", "reveal"]
+
+# git.yazi — тянуть git-статус для файлов и папок (значки + подсветка).
+[[plugin.prepend_fetchers]]
+url   = "*"
+run   = "git"
+group = "git"
+
+[[plugin.prepend_fetchers]]
+url   = "*/"
+run   = "git"
+group = "git"

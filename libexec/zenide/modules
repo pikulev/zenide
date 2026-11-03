@@ -1,0 +1,45 @@
+#!/usr/bin/env sh
+# Загрузчик модулей: zenide modules load | list
+#
+# Модуль — это ПОВЕДЕНИЕ (хуки, генерация биндов), а не конфиг тула и не выбор
+# из слота. Ядро не знает о модулях ничего: ни одного `if имя_модуля` в коде.
+# Контракт — три файла в modules/<имя>/:
+#   init.sh    обязателен; загрузчик зовёт, модуль вешает хуки и бинды сам
+#   check.sh   опционален; зовёт `zenide doctor`, печатает состояние/недостающее
+#   README.md  зачем он, от чего зависит, что сломается без него
+# Включён = назван в `modules` в profile/modules.conf. Реестра нет.
+set -u
+
+action="${1:-list}"
+MODROOT="$ZENIDE_ROOT/modules"
+
+case "$action" in
+load)
+    for m in $ZENIDE_MODULES; do
+        init="$MODROOT/$m/init.sh"
+        if [ -x "$init" ]; then
+            # Молча: загрузчик бежит из tmux-хука, писать в stdout оттуда
+            # некуда. Проблемы показывает `zenide doctor`.
+            "$init" || printf 'zenide modules: %s упал\n' "$m" >&2
+        else
+            printf 'zenide modules: нет такого модуля — %s\n' "$m" >&2
+        fi
+    done
+    ;;
+list)
+    for d in "$MODROOT"/*/; do
+        [ -d "$d" ] || continue
+        m="$(basename "$d")"
+        case " $ZENIDE_MODULES " in
+        *" $m "*) mark="вкл " ;;
+        *)        mark="выкл" ;;
+        esac
+        desc="$(sed -n '2s/^#[[:space:]]*//p' "$d/init.sh" 2>/dev/null)"
+        printf '  [%s] %-24s %s\n' "$mark" "$m" "$desc"
+    done
+    ;;
+*)
+    printf 'zenide modules: load | list\n' >&2
+    exit 2
+    ;;
+esac

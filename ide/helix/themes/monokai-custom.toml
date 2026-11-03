@@ -1,0 +1,16 @@
+# Кастомная тема поверх встроенной Monokai Pro Spectrum.
+# Меняем только цвета режимов в статусбаре — всё остальное из родителя.
+inherits = "monokai_pro_spectrum"
+
+# Окраска всего бара по режиму (работает благодаря color-modes = true).
+# Тёмный жирный текст на цветном фоне — сразу видно режим. Палитра Monokai Pro Spectrum.
+"ui.statusline.normal" = { fg = "#222222", bg = "#7bd88f", modifiers = ["bold"] }  # green
+"ui.statusline.insert" = { fg = "#222222", bg = "#fce566", modifiers = ["bold"] }  # yellow
+"ui.statusline.select" = { fg = "#222222", bg = "#948ae3", modifiers = ["bold"] }  # purple
+
+# индикатор мягкого переноса (↪) — едва заметный
+"ui.virtual.wrap" = { fg = "#3a393b" }
+
+# текущая строка — едва светлее фона, якорь для глаза при скролле
+# (унаследованный вариант темнее фона — на тёмной теме читается хуже)
+"ui.cursorline.primary" = { bg = "#2a292b" }

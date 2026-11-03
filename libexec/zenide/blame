@@ -1,0 +1,310 @@
+#!/usr/bin/env bash
+# C-Space B: ИНТЕРАКТИВНЫЙ blame текущего файла hx в попапе (fzf + delta).
+# Отвечает на всю цепочку вопросов, а не только «кто»:
+#   список blame (курсор сразу на строке из hx) + превью диффа её коммита,
+#   Enter — дифф того коммита целиком,
+#   C-l   — история ИМЕННО этой строки (git log -L: git сам протаскивает строку
+#           через историю, включая переносы кода — это и есть «что было до»),
+#   C-o   — открыть файл НА ТОЙ ревизии в hx, на той же строке, только чтение,
+#   C-d   — прежний статичный blame всего файла через delta (обзор с подсветкой),
+#   C-y   — sha в буфер обмена, C-g — lazygit, отфильтрованный по файлу.
+# Enter намеренно НЕ закрывает попап (это execute, а не accept): дифф посмотрел —
+# вернулся в список. Единственный accept — C-o, он уводит в hx.
+#
+# Файл и строка — из zenide ctx (инъекция %{buffer_name}) с фолбэком на парсинг
+# статусбара, как в zenide diff. Для отладки можно позвать руками: zenide blame ФАЙЛ [СТРОКА].
+# Блейм считается по ДИСКУ: несохранённые правки сдвигают номера строк
+# (auto-save.focus-lost в helix пишет буфер при уходе в попап — обычно совпадает).
+
+# ранние выходы: причина в самом попапе + ожидание клавиши
+die() {
+    printf '%s\n\n[нажми любую клавишу]' "$1"
+    read -r -n1 -s
+    exit 0
+}
+
+file="" line=""
+if [ -n "$1" ]; then
+    # ручной вызов (отладка): файл и строка пришли аргументами.
+    # Путь разворачиваем в абсолютный: ниже делается cd, относительный бы «уехал»
+    [ -e "$1" ] || die "нет такого файла: $1"
+    file="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
+    line="$2"
+    cwd="$(dirname "$file")"
+else
+    pane="$(tmux list-panes -s -F '#{pane_id} #{pane_current_command}' 2>/dev/null \
+            | awk '$2 == "hx" { print $1; exit }')"
+    [ -n "$pane" ] || die "hx не найден в текущей сессии"
+    cwd="$(tmux display-message -p -t "$pane" '#{pane_current_path}')"
+
+    # файл и строка СФОКУСИРОВАННОГО сплита — через zenide ctx (парсинг
+    # статусбара при сплитах hx брал не тот файл)
+    ctx="$("$ZENIDE_ROOT/bin/zenide" ctx)"
+    f="$(printf '%s\n' "$ctx" | sed -n 1p)"
+    line="$(printf '%s\n' "$ctx" | sed -n 2p)"
+    case "$f" in
+        /*) [ -e "$f" ] && file="$f" ;;
+        ?*) [ -e "$cwd/$f" ] && file="$cwd/$f" ;;
+    esac
+
+    # фолбэк — старый парсинг статусбара (hx не ответил на инъекцию)
+    if [ -z "$file" ]; then
+        line=""
+        sl="$(tmux capture-pane -p -t "$pane" | grep -E '^ *(NOR|INS|SEL) ' | tail -1)"
+        for tok in $sl; do
+            case "$tok" in NOR|INS|SEL|'[+]'|'[RO]') continue ;; esac
+            if [ -z "$file" ] && [ -e "$cwd/$tok" ] && [ ! -d "$cwd/$tok" ]; then
+                file="$cwd/$tok"
+                continue
+            fi
+            case "$tok" in
+                [0-9]*:[0-9]*) line="${tok%%:*}" ;;
+            esac
+        done
+    fi
+    [ -n "$file" ] || die "файл не найден (ни через zenide ctx, ни в статусбаре)"
+fi
+case "$line" in ''|*[!0-9]*) line=1 ;; esac
+
+cd "$cwd" || die "недоступен каталог $cwd"
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "не git-репозиторий: $cwd"
+git ls-files --error-unmatch "$file" >/dev/null 2>&1 || die "$file ещё не в git (untracked)"
+
+# дальше работаем ОТ КОРНЯ репозитория и путём относительно него: ровно в таком
+# виде путь понимают и `git log -L n,n:путь`, и `git show sha:путь`
+rel="$(git ls-files --full-name -- "$file" | head -1)"
+root="$(git rev-parse --show-toplevel)"
+cd "$root" || die "недоступен корень репозитория $root"
+
+# ── хелперы в tmpdir ──────────────────────────────────
+# Отдельные скрипты вместо инлайн-sh в --bind: так не нужно экранировать кавычки
+# внутри кавычек fzf (тот же приём, что в zenide grep).
+export BL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/zenide-blame.XXXXXX")"
+export BL_FILE="$rel"
+trap 'rm -rf "$BL_DIR"' EXIT
+
+DELTA_SYNTAX='Monokai Extended'
+export BL_SYNTAX="$DELTA_SYNTAX"
+
+# превью: шапка коммита + его дифф ПО ЭТОМУ ФАЙЛУ через delta ($1 = sha)
+cat > "$BL_DIR/prev" <<'PREV'
+#!/usr/bin/env sh
+sha="$1"
+case "$sha" in
+    '') exit 0 ;;
+    0000000*) printf 'строка ещё не закоммичена — живёт только в рабочем дереве\n'; exit 0 ;;
+    *[!0-9a-f]*) printf 'ожидался sha, а пришло: %s\n' "$sha"; exit 0 ;;
+esac
+git show -s --color=always --date=format:'%Y-%m-%d %H:%M' \
+    --format='%C(bold)%s%C(reset)%n%C(dim)%an <%ae>%n%ad  (%ar)%n%h%C(reset)%C(auto)%d%C(reset)' "$sha"
+# тело сообщения печатаем только если оно есть: пустое %b оставляло пустые
+# строки, а превью в попапе — это 55% высоты, место дорого
+body="$(git show -s --format=%b "$sha")"
+[ -n "$body" ] && printf '\n%s\n' "$body"
+# -M -C: следить за переименованиями/переносами, иначе дифф «по файлу» пустеет
+d="$(git show --no-ext-diff --format= -M -C "$sha" -- "$BL_FILE")"
+if [ -z "$d" ]; then
+    printf '(в этом коммите %s не менялся — показан дифф коммита целиком)\n\n' "$BL_FILE"
+    d="$(git show --no-ext-diff --format= -M -C "$sha")"
+fi
+printf '%s\n' "$d" | delta --dark --line-numbers --paging=never \
+    --syntax-theme="$BL_SYNTAX" --width "${FZF_PREVIEW_COLUMNS:-120}"
+PREV
+
+# Enter: дифф коммита целиком на весь попап ($1 = sha)
+# less без -F (с -F попап захлопывается, если дифф влез в экран — см. zenide diff)
+cat > "$BL_DIR/show" <<'SHOW'
+#!/usr/bin/env sh
+sha="$1"
+case "$sha" in
+    ''|0000000*) exit 0 ;;
+    *[!0-9a-f]*)
+        printf 'ожидался sha, а пришло: %s\n\n[нажми любую клавишу]' "$sha"
+        read -r -n1 -s _x
+        exit 0 ;;
+esac
+git show --no-ext-diff -M -C "$sha" \
+    | LESS='-R' DELTA_PAGER='less -R' delta --dark --line-numbers \
+          --syntax-theme="$BL_SYNTAX"
+SHOW
+
+# C-l: история ИМЕННО этой строки ($1 = sha её коммита, $2 = номер строки В ТОМ
+# КОММИТЕ). Якорь именно такой, а не «номер строки сейчас»: git log -L считает
+# номера по указанной ревизии (по умолчанию HEAD), а список blame построен по
+# рабочему дереву — при несохранённых правках номера разъезжаются и история
+# показывалась бы для ЧУЖОЙ строки. Коммит+его номер строки всегда согласованы,
+# а новее этого коммита строку по определению никто не трогал — ничего не теряем.
+# git log -L отдаёт дифф-кусок на каждую правку строки; раскладываем куски по
+# файлам (по sha) и выбираем вложенным fzf — превью показывает «как было → как стало».
+cat > "$BL_DIR/linehist" <<'LH'
+#!/usr/bin/env sh
+sha="$1"; n="$2"
+case "$sha" in
+    0000000*)
+        printf 'строка правлена в рабочем дереве и ещё не закоммичена —\nистории у неё пока нет (Enter/C-d покажут контекст файла)\n\n[нажми любую клавишу]'
+        read -r -n1 -s _x
+        exit 0 ;;
+    ''|*[!0-9a-f]*)
+        printf 'ожидался sha, а пришло: %s\n\n[нажми любую клавишу]' "$sha"
+        read -r -n1 -s _x
+        exit 0 ;;
+esac
+case "$n" in ''|*[!0-9]*) n=1 ;; esac
+d="$BL_DIR/lh.$sha.$n"
+if [ ! -d "$d" ]; then
+    mkdir -p "$d"
+    # SOH (\001) как разделитель записей: в дифф-тексте не встречается.
+    # Путь берётся на ревизии $sha: если файл ПОЗЖЕ переименовали, blame покажет
+    # и старые коммиты — тогда git ругнётся «no path in commit», и это видно
+    # в попапе (искать переименование через Enter → дифф коммита).
+    if ! git log -L "$n,$n:$BL_FILE" --date=short \
+            --format="$(printf '\001')%H%x09%an%x09%ad%x09%s" "$sha" > "$d/raw" 2>"$d/err"; then
+        printf 'git log -L не смог:\n\n%s\n\n[нажми любую клавишу]' "$(cat "$d/err")"
+        rm -rf "$d"
+        read -r -n1 -s _x
+        exit 0
+    fi
+    awk -v dir="$d" 'BEGIN { RS = sprintf("%c", 1) }
+        NR > 1 {
+            nl = index($0, "\n")
+            split(substr($0, 1, nl - 1), f, "\t")
+            sha = substr(f[1], 1, 12)
+            printf "%s", substr($0, nl + 1) > (dir "/" sha ".patch")
+            printf "%s\t\033[38;2;105;103;108m%s  %s  %-14s\033[0m %s\n", \
+                   sha, sha, f[3], f[2], f[4]
+        }' "$d/raw" > "$d/list"
+fi
+[ -s "$d/list" ] || { printf 'правок этой строки в истории нет\n\n[нажми любую клавишу]'; read -r -n1 -s _x; exit 0; }
+fzf --ansi --layout reverse --delimiter '\t' --with-nth 2.. \
+    --prompt "история строки ❯ " --header-first \
+    --header 'сверху — самая свежая правка этой строки · Enter дифф коммита целиком · Esc назад в blame' \
+    --preview "delta --dark --line-numbers --paging=never --syntax-theme=\"\$BL_SYNTAX\" --width \${FZF_PREVIEW_COLUMNS:-120} < $d/{1}.patch" \
+    --preview-window 'up,60%,border-bottom' \
+    --bind "enter:execute($BL_DIR/show {1})" \
+    < "$d/list" > /dev/null
+LH
+
+# C-d: прежний статичный blame всего файла через delta ($1 = строка для прыжка)
+cat > "$BL_DIR/static" <<'ST'
+#!/usr/bin/env sh
+line="${1:-1}"
+jump=$(( line > 6 ? line - 6 : 1 ))
+# НЕ --date=relative: delta такой вывод не распознаёт (давность рисует сам)
+git blame -- "$BL_FILE" \
+    | LESS='-R' DELTA_PAGER="less -R +${jump}g" delta --dark \
+          --syntax-theme="$BL_SYNTAX" \
+          --default-language "${BL_FILE##*.}" \
+          --blame-palette "#222222 #2c2b2d" \
+          --blame-format "{author:<13.12} {timestamp:<16} {commit:<8}"
+ST
+
+chmod +x "$BL_DIR"/prev "$BL_DIR"/show "$BL_DIR"/linehist "$BL_DIR"/static
+
+# ── список blame ──────────────────────────────────────
+# `-n` добавляет номер строки В ИСХОДНОМ коммите — он нужен для C-o (открыть
+# файл на той ревизии ровно на этой строке). --abbrev=12: 8 знаков в больших
+# репозиториях бывают неоднозначны.
+# Поля для fzf (TAB): 1 — строка сейчас, 2 — sha, 3 — строка в том коммите,
+# 4 — то, что видно (--with-nth 4..). Табы внутри кода разворачиваем в пробелы,
+# иначе они ломают разбор полей.
+git blame -n --abbrev=12 --date=short -- "$rel" > "$BL_DIR/blame" 2>/dev/null
+
+# Подсветка синтаксиса в колонке кода — от bat (ассеты те же, что у delta:
+# `delta --list-syntax-themes` и `bat --list-themes` дают один Monokai Extended),
+# построчно: вывод bat 1:1 соответствует строкам файла (--style=plain --wrap=never),
+# а blame мы считаем по тому же рабочему файлу → склейка по номеру строки точна.
+# Почему bat, а не delta, который уже стоит: delta красит код только в своём
+# blame-режиме и кладёт ФОН на всю строку (чередование по коммитам + [0K) —
+# в fzf он воевал бы с подсветкой строки под курсором. Нужен плоский
+# foreground-only рендер. Нет bat (другая машина, Brewfile не прогнан) —
+# работаем как раньше: код из вывода blame, без подсветки.
+: > "$BL_DIR/hl"
+if command -v bat >/dev/null 2>&1; then
+    bat --color=always --style=plain --paging=never --wrap=never --tabs=4 \
+        --theme="$DELTA_SYNTAX" -- "$rel" > "$BL_DIR/hl" 2>/dev/null
+fi
+
+list="$(
+    awk -v hlfile="$BL_DIR/hl" '
+        # сравнение по FILENAME, а НЕ классический NR==FNR: при пустом первом
+        # файле (bat не стоит/не смог) NR==FNR верно и для второго файла —
+        # blame уехал бы в массив подсветки, список вышел бы пустым
+        FILENAME == hlfile { hl[FNR] = $0; next }
+        {
+            # «sha orig (автор дата финальная) код» — служебная часть до ПЕРВОЙ
+            # «)»; дальше начинается код (его скобки уже не мешают)
+            p = index($0, ")")
+            if (p == 0) next                      # не формат blame — пропускаем
+            head = substr($0, 1, p - 1)
+            code = substr($0, p + 2)
+            n = split(head, f, /[ \t]+/)
+            if (n < 5) next
+            sha = f[1]; sub(/^\^/, "", sha)      # ^sha — граничный (корневой) коммит
+            orig = f[2]
+            date = f[n - 1]
+            final = f[n]
+            author = ""
+            for (i = 3; i <= n - 2; i++) author = author (i > 3 ? " " : "") f[i]
+            sub(/^\(/, "", author)
+            if (length(author) > w) w = length(author)
+            # код — подсвеченный от bat (строка файла = FNR вывода blame),
+            # иначе сырой из blame. Табы гасим в любом случае: в поле 4 они
+            # ломают разбор (bat с --tabs=4 уже развернул их сам)
+            if (FNR in hl) code = hl[FNR]
+            gsub(/\t/, "    ", code)
+            m++
+            L[m] = final; S[m] = sha; O[m] = orig
+            A[m] = author; D[m] = date; C[m] = code
+        }
+        END {
+            if (w > 18) w = 18                    # ширина колонки автора — по файлу
+            gray = "\033[38;2;105;103;108m"
+            dim  = "\033[38;2;82;80;83m"
+            rst  = "\033[0m"
+            for (i = 1; i <= m; i++)
+                printf "%s\t%s\t%s\t%s%s %-*.*s %s %5s%s %s│%s %s\n", \
+                       L[i], S[i], O[i], \
+                       gray, substr(S[i], 1, 8), w, w, A[i], D[i], L[i], rst, \
+                       dim, rst, C[i]
+        }' "$BL_DIR/hl" "$BL_DIR/blame"
+)"
+[ -n "$list" ] || die "git blame ничего не вернул для $rel"
+
+legend='Enter дифф · C-l история строки · C-o файл на ревизии в hx · C-d весь blame · C-y sha · C-g lazygit · S-↑↓ превью'
+
+# Enter — execute (попап остаётся), accept только на C-o → он и уводит в hx
+sel="$(
+    printf '%s\n' "$list" | fzf \
+        --ansi --layout reverse --delimiter '\t' --with-nth 4.. \
+        --prompt 'blame ❯ ' --header-first --header "$legend" \
+        `# load, а не start: на start список ещё не прочитан, и pos молча` \
+        `# не срабатывает — попап открывался на ПЕРВОЙ строке файла, а не на` \
+        `# той, где стоял курсор (fzf 0.74)` \
+        --bind "load:pos($line)" \
+        --bind "enter:execute($BL_DIR/show {2})" \
+        --bind "ctrl-l:execute($BL_DIR/linehist {2} {3})" \
+        --bind "ctrl-d:execute($BL_DIR/static {1})" \
+        --bind "ctrl-o:accept" \
+        --bind "ctrl-y:execute-silent(printf %s {2} | pbcopy)+change-header(sha {2} → буфер обмена   ·   $legend)" \
+        --bind "ctrl-g:execute(XDG_CONFIG_HOME=\$HOME/.config lazygit --filter '$rel')" \
+        --preview "$BL_DIR/prev {2}" \
+        --preview-window 'up,55%,border-bottom'
+)" || exit 0
+[ -n "$sel" ] || exit 0
+
+# ── C-o: файл НА ТОЙ ревизии в hx ─────────────────────
+sha="$(printf '%s' "$sel" | cut -f2)"
+orig="$(printf '%s' "$sel" | cut -f3)"
+case "$sha" in 0000000*) exit 0 ;; esac
+
+# sha В НАЧАЛЕ имени, расширение остаётся в конце — иначе hx не определит язык
+snap="${TMPDIR:-/tmp}/zenide-blame-revs"
+mkdir -p "$snap"
+out="$snap/${sha:0:8}~$(basename "$rel")"
+rm -f "$out"                 # прошлый снимок лежит с снятой записью — перезапись упала бы
+# путь мог называться иначе в том коммите (переименование) — тогда git show не найдёт
+git show "$sha:$rel" > "$out" 2>/dev/null \
+    || die "в коммите ${sha:0:8} нет пути $rel
+(файл тогда назывался иначе — ищи переименование через C-l/Enter)"
+chmod a-w "$out"             # hx пометит буфер [RO]: историю случайно не поправишь
+exec "$ZENIDE_ROOT/bin/zenide" open "$out" "$orig"

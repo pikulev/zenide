@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+#
+# pcap2flows — convert a pcap/pcapng capture into the TSV feed consumed by the
+# `net.pcap-flows` lens. One row per packet; the lens folds packets into flows
+# (event = connection). See docs/lens-pcap.md §2 for the feed contract.
+#
+# Why a wrapper and not just tshark: (1) the field set must stay in lockstep
+# with what the lens reads — one source of truth here; (2) tshark field names
+# drift across versions (e.g. tls.handshake.extensions.supported_version exists
+# only in newer builds), so we validate against THIS build and drop unknowns —
+# the lens treats a missing column as "no signal", so that is safe.
+#
+# Usage:
+#   pcap2flows <input.pcap[ng]> [-o out.flows.tsv] [-Y 'filter'] [-k keys.log]
+#
+#   -o FILE   output path (default: <input-basename>.flows.tsv in cwd)
+#   -Y EXPR   tshark display filter — slice at capture time to cut size,
+#             e.g. -Y 'ip.addr==10.0.0.5'  or  -Y 'not (ssdp or mdns)'
+#   -k FILE   TLS keylog (SSLKEYLOGFILE) — decrypt TLS 1.3 cert/app payload so
+#             the extra fields populate. Only works if you captured with it.
+#   -h        this help
+#
+# Provenance: the feed carries hostnames (SNI), cleartext URLs, IPs, cert names
+# — treat it like the raw capture. *.pcap / *.flows.tsv are gitignored; never
+# commit someone else's capture or feed (SPEC.md invariant #6).
+
+set -euo pipefail
+
+# Exactly the columns net.pcap-flows.js reads (keep in sync with the lens).
+# Space-separated so we stay bash-3.2 portable (no arrays needed for the list).
+FIELDS="
+  frame.time_epoch frame.len ip.proto ip.src ip.dst
+  tcp.stream udp.stream tcp.srcport tcp.dstport udp.srcport udp.dstport
+  tcp.flags.syn tcp.flags.ack tcp.flags.fin tcp.flags.reset tcp.len
+  tcp.analysis.retransmission tcp.analysis.duplicate_ack
+  tls.handshake.extensions_server_name dns.qry.name dns.a
+  http.host http.request.method http.request.uri http.response.code
+  http.referer http.upgrade _ws.col.Protocol
+  tls.handshake.type tls.handshake.ciphersuite tls.handshake.version
+  tls.handshake.extensions.supported_version tls.record.version
+  tls.handshake.extensions_alpn_str tls.alert_message.level tls.alert_message.desc
+  x509ce.dNSName
+"
+
+usage() { sed -n '2,/^set -euo/p' "$0" | sed 's/^# \{0,1\}//; /^set -euo/d'; exit "${1:-0}"; }
+
+INPUT=""
+OUTPUT=""
+FILTER=""
+KEYLOG=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help) usage 0 ;;
+    -o) OUTPUT="$2"; shift 2 ;;
+    -Y) FILTER="$2"; shift 2 ;;
+    -k) KEYLOG="$2"; shift 2 ;;
+    -*) echo "pcap2flows: unknown option '$1'" >&2; usage 1 ;;
+    *)  if [ -z "$INPUT" ]; then INPUT="$1"; shift
+        else echo "pcap2flows: unexpected argument '$1'" >&2; usage 1; fi ;;
+  esac
+done
+
+[ -n "$INPUT" ] || { echo "pcap2flows: missing input capture" >&2; usage 1; }
+[ -f "$INPUT" ] || { echo "pcap2flows: no such file: $INPUT" >&2; exit 1; }
+command -v tshark >/dev/null 2>&1 || {
+  echo "pcap2flows: tshark not found. Install Wireshark CLI:" >&2
+  echo "  macOS:  brew install wireshark" >&2
+  echo "  Debian: sudo apt install tshark" >&2
+  exit 127
+}
+
+# Default output: strip capture extension, add .flows.tsv (in cwd).
+if [ -z "$OUTPUT" ]; then
+  base=$(basename "$INPUT")
+  base=${base%.gz}; base=${base%.pcapng}; base=${base%.pcap}; base=${base%.cap}
+  OUTPUT="$base.flows.tsv"
+fi
+
+[ -n "$KEYLOG" ] && [ ! -f "$KEYLOG" ] && { echo "pcap2flows: keylog not found: $KEYLOG" >&2; exit 1; }
+
+# Which of our fields exist in THIS tshark build? _ws.col.* are column
+# pseudo-fields (not listed by -G fields) and are always valid in -e.
+KNOWN=$(mktemp "${TMPDIR:-/tmp}/pcap2flows.XXXXXX")
+trap 'rm -f "$KNOWN"' EXIT
+tshark -G fields 2>/dev/null | awk -F'\t' '$1=="F"{print $3}' > "$KNOWN"
+
+# Build the argv incrementally (set --) so display filters with spaces survive
+# and field words split cleanly — portable, no arrays.
+set -- -r "$INPUT" -T fields -E header=y
+dropped=""
+kept=0
+for f in $FIELDS; do
+  case "$f" in
+    _ws.*) set -- "$@" -e "$f"; kept=$((kept + 1)) ;;
+    *)
+      if grep -qxF "$f" "$KNOWN"; then set -- "$@" -e "$f"; kept=$((kept + 1))
+      else dropped="$dropped $f"; fi ;;
+  esac
+done
+[ -n "$FILTER" ] && set -- "$@" -Y "$FILTER"
+[ -n "$KEYLOG" ] && set -- "$@" -o "tls.keylog_file:$KEYLOG"
+
+echo "pcap2flows: $INPUT → $OUTPUT ($kept fields${FILTER:+, filter: $FILTER}${KEYLOG:+, keylog})" >&2
+tshark "$@" > "$OUTPUT"
+
+rows=$(($(wc -l < "$OUTPUT") - 1))
+[ "$rows" -lt 0 ] && rows=0
+size=$(du -h "$OUTPUT" | cut -f1 | tr -d ' ')
+echo "pcap2flows: wrote $rows packet rows, $size" >&2
+[ -n "$dropped" ] && echo "pcap2flows: note — dropped field(s) absent in this tshark:$dropped" >&2
+[ "$rows" -eq 0 ] && echo "pcap2flows: warning — 0 rows. Wrong filter, or non-IP capture?" >&2
+echo "pcap2flows: reminder — feed carries hostnames/URLs/IPs; do not commit (gitignored)." >&2
+echo "pcap2flows: drop $OUTPUT into the app; the 'pcap · network flows' lens will claim it." >&2

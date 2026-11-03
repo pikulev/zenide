@@ -1,0 +1,60 @@
+#!/bin/sh
+# git-статус проекта для status-right — ТА ЖЕ семантика и те же символы, что в
+# промпте шелла (sh/parts/git-prompt.sh + git-prompt.zsh, порцелан v2):
+#   ветка (detached → :sha) · ↓behind 🚀ahead · ⛔️unmerged 📦staged 🎈unstaged …untracked
+#   всё чисто → ☘️
+# Каталог приходит аргументом: сессия = проект, поэтому зовём с #{session_path}
+# (а не pane_current_path — cwd пейна бывает подпапкой/домом, как в yazi-бинде).
+#
+# Крутится раз в status-interval у каждого прицепленного клиента, поэтому:
+# GIT_OPTIONAL_LOCKS=0 (не трогать index.lock под носом у lazygit/hx) и молчать
+# на всём, что не репозиторий (дом, /tmp, удалённый каталог) — пустой вывод.
+
+dir=${1:-$PWD}
+[ -d "$dir" ] || exit 0
+
+export GIT_OPTIONAL_LOCKS=0
+git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1 || exit 0
+
+git -C "$dir" status --branch --porcelain=v2 2>/dev/null | awk '
+    BEGIN { ORS = "" }
+
+    $2 == "branch.oid"      { oid = $3 }
+    $2 == "branch.head"     { head = $3 }
+    # "# branch.ab +2 -1" → ahead=2, behind=1
+    $2 == "branch.ab"       { ahead = $3 + 0; behind = -($4 + 0) }
+
+    $1 == "?"               { ++untracked }
+    $1 == "u"               { ++unmerged }
+    # XY-колонка: первый символ — индекс (staged), второй — рабочее дерево.
+    # substr, а не split($2, a, "") — пустой FS понимают не все awk на macOS.
+    $1 == "1" || $1 == "2" {
+        if (substr($2, 1, 1) != ".") ++staged;
+        if (substr($2, 2, 1) != ".") ++unstaged;
+    }
+
+    END {
+        if (head == "") exit 0;                       # мусор вместо порцелана
+
+        # Цвета — ровно те же номера, что в git-prompt.sh: ветка %F{85},
+        # ↓ %F{243}, 🚀/📦 white(7), ⛔️🎈… red(1), ☘️ bold green. Цвет красит и
+        # эмодзи, и цифру за ним — как prompt_element(prefix, content) в шелле.
+        if (head == "(detached)") {
+            name = ":" substr(oid, 1, 7); color = "#[fg=cyan]";   # DETACHED
+        } else {
+            name = head; color = "#[fg=colour85]";
+        }
+        gsub("#", "##", name);                        # «#» в имени ветки — не разметка
+        print color name;
+
+        if (behind > 0)    print "#[fg=colour243] ↓" behind;
+        if (ahead  > 0)    print "#[fg=white] 🚀" ahead;
+        if (unmerged > 0)  print "#[fg=red] ⛔️" unmerged;
+        if (staged > 0)    print "#[fg=white] 📦" staged;
+        if (unstaged > 0)  print "#[fg=red] 🎈" unstaged;
+        if (untracked > 0) print "#[fg=red] …" untracked;
+        if (unmerged + staged + unstaged + untracked == 0) print "#[fg=green,bold] ☘️#[nobold]";
+
+        print "  ";                                   # отбивка от часов
+    }
+'

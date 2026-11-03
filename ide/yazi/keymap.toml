@@ -1,0 +1,16 @@
+# Кастомные клавиши yazi (prepend — поверх дефолтов, остальное не трогается).
+
+[[mgr.prepend_keymap]]
+on   = "h"
+run  = "plugin leave-guard"
+desc = "Наверх, но не выше корня проекта (YAZI_ROOT)"
+
+[[mgr.prepend_keymap]]
+on   = "<Left>"
+run  = "plugin leave-guard"
+desc = "Наверх, но не выше корня проекта (YAZI_ROOT)"
+
+[[mgr.prepend_keymap]]
+on   = "M"
+run  = "plugin sshfs -- menu"
+desc = "SSHFS: маунт/анмаунт/терминал хостов (m/u/t…)"

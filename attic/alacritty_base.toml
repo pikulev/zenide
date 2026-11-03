@@ -1,0 +1,4 @@
+[general]
+import = [
+  "~/myconfig/alacritty.toml"
+]

@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# ./try — весь zenide с отдельными HOME/XDG и сокетом tmux.
+#
+# Зачем отдельный режим: «попробовать» не должно означать «установить».
+# Человек со своими конфигами не обязан сначала доверять установщику, чтобы
+# понять, нужен ли ему сетап вообще.
+#
+# Как: подменяем HOME и XDG на .sandbox/ внутри клона и поднимаем tmux на
+# ОТДЕЛЬНОМ сокете со своим конфигом. Твои ~/.config/*, работающие сессии
+# tmux и ~/.tmux.conf не задеты; выход — exit, следов не остаётся.
+#
+#   ./try            поднять песочницу
+#   ./try --keep     не удалять .sandbox после выхода (посмотреть, что внутри)
+set -uo pipefail
+cd "$(dirname "$0")" || exit 1
+ROOT="$PWD"
+
+KEEP=0
+[ "${1:-}" = --keep ] && KEEP=1
+
+SOCKET=zenide-try
+SANDBOX="$ROOT/.sandbox"
+
+c_bold=$'\033[1m' c_dim=$'\033[38;5;242m' c_warn=$'\033[33m' c_off=$'\033[0m'
+
+command -v tmux >/dev/null || {
+    printf 'нужен tmux\n' >&2
+    exit 1
+}
+
+# ── сборка песочницы ───────────────────────────────────
+rm -rf "$SANDBOX"
+mkdir -p "$SANDBOX"/{config,data,state,cache}
+
+# конфиги ВСЕХ соседей — песочнице нечего экономить, она одноразовая
+ln -s "$ROOT" "$SANDBOX/config/zenide"
+for d in ide/*/; do
+    t="$(basename "$d")"
+    ln -s "$ROOT/ide/$t" "$SANDBOX/config/$t"
+done
+
+# Профиль — НЕЙТРАЛЬНЫЙ: только трекаемые файлы, без твоих *.local. Песочница
+# показывает то, что увидит человек с чистого клона, а не твою машину.
+mkdir -p "$SANDBOX/profile"
+for f in profile/*.conf; do
+    [ -e "$f" ] && cp "$f" "$SANDBOX/profile/"
+done
+
+# Отдельный HOME нужен и тулам без XDG, и истории шелла.
+export HOME="$SANDBOX/home"
+mkdir -p "$HOME"
+export XDG_CONFIG_HOME="$SANDBOX/config"
+export XDG_DATA_HOME="$SANDBOX/data"
+export XDG_STATE_HOME="$SANDBOX/state"
+export XDG_CACHE_HOME="$SANDBOX/cache"
+export ZENIDE_ROOT="$ROOT"
+export ZENIDE_PROFILE="$SANDBOX/profile"
+export PATH="$ROOT/bin:$PATH"
+# tig зовёт редактор через эту переменную; в обычной жизни её ставит
+# shell/parts/tig.sh, но шелл мы не трогаем — значит выставляем здесь
+export TIG_EDITOR="$ROOT/ide/tig/hx-goto.sh"
+
+# ── что в песочнице НЕ как в жизни ─────────────────────
+# Печатать это обязательно. Песочница, выдающая себя за установку, хуже
+# отсутствия песочницы: человек примет решение по картинке, которой не будет.
+cat <<EOF
+
+${c_bold}песочница zenide${c_off}  ${c_dim}сокет $SOCKET · $SANDBOX${c_off}
+
+${c_bold}Не тронуто:${c_off} ~/.config/*, ~/.tmux.conf, твои сессии tmux, шелл.
+
+${c_bold}Отличия от реальной установки${c_off} — чтобы решение принималось честно:
+
+  ${c_warn}ghostty${c_off}    терминал уже запущен, его конфиг не подменить на лету
+             → шрифт, цвета и отступы останутся твои
+  ${c_warn}профиль${c_off}    HOME и XDG временные; личные настройки шелла и git identity
+             не подхватываются. Первый шелл — bash без startup-файлов.
+  ${c_warn}затенение${c_off}  личные ~/.tmux.conf и ~/.gitconfig здесь не читаются;
+             обычную установку проверяет \`zenide doctor\`
+  ${c_warn}модули${c_off}     раскладочные выключены: они трогают СИСТЕМНУЮ раскладку,
+             и выход из песочницы этого не откатит
+  ${c_dim}Это изоляция окружения, не ограничение доступа к файловой системе:
+  команды и редактор могут менять открытые проекты.${c_off}
+
+${c_bold}Выход:${c_off} exit или C-Space затем :kill-server
+${c_bold}Справка по клавишам:${c_off} C-Space ?
+
+EOF
+printf 'Enter — поднять, C-c — отмена: '
+read -r _
+
+# ── подъём ─────────────────────────────────────────────
+cleanup() {
+    tmux -L "$SOCKET" kill-server 2>/dev/null
+    if [ "$KEEP" = 1 ]; then
+        printf '\n.sandbox оставлен: %s\n' "$SANDBOX"
+    else
+        rm -rf "$SANDBOX"
+        printf '\nВременные HOME/XDG убраны.\n'
+    fi
+}
+trap cleanup EXIT INT TERM
+
+tmux -L "$SOCKET" -f "$ROOT/ide/tmux/tmux.conf" new-session -A -s try -c "$ROOT" "/bin/bash --noprofile --norc"

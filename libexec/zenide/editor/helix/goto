@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# C-Space Enter: прыжок в окно с hx («домой»); hx не запущен — поднять его.
+# Пейн ищем по процессу (как в zenide open) — hx не привязан к номеру окна.
+
+pane="$(tmux list-panes -s -F '#{pane_id} #{pane_current_command}' 2>/dev/null \
+        | awk '$2 == "hx" { print $1; exit }')"
+
+if [ -n "$pane" ]; then
+    tmux select-pane -t "$pane"
+    tmux select-window -t "$pane"
+    exit 0
+fi
+
+# hx нет — поднять в новом окне от корня сессии (сессия = проект, см. zenide project)
+root="$(tmux display-message -p '#{session_path}')"
+[ -d "$root" ] || root="$(tmux display-message -p '#{pane_current_path}')"
+tmux new-window -n hx -c "$root" "hx ."

@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# C-Space g: окно lazygit; если в hx открыт файл — встать на него в панели Files.
+# Файл добываем парсингом статусбара hx (как в jump.d/yazi), затем в lazygit
+# шлём: «2» (фокус Files) → «/» (поиск) → имя файла → Enter.
+
+here="$(tmux display-message -p '#{pane_current_path}')"
+
+# --- текущий файл hx: через zenide ctx (сфокусированный сплит),
+#     фолбэк — парсинг статусбара ---
+file=""
+cwd="$here"
+pane="$(tmux list-panes -s -F '#{pane_id} #{pane_current_command}' 2>/dev/null \
+        | awk '$2 == "hx" { print $1; exit }')"
+if [ -n "$pane" ]; then
+    cwd="$(tmux display-message -p -t "$pane" '#{pane_current_path}')"
+    f="$("$ZENIDE_ROOT/bin/zenide" ctx | sed -n 1p)"
+    case "$f" in
+        /*) [ -e "$f" ] && file="$f" ;;
+        ?*) [ -e "$cwd/$f" ] && file="$f" ;;
+    esac
+    if [ -z "$file" ]; then
+        sl="$(tmux capture-pane -p -t "$pane" | grep -E '^ *(NOR|INS|SEL) ' | tail -1)"
+        for tok in $sl; do
+            case "$tok" in NOR|INS|SEL|'[+]'|'[RO]') continue ;; esac
+            if [ -e "$cwd/$tok" ]; then
+                file="$tok"
+                break
+            fi
+        done
+    fi
+fi
+
+# --- окно lazygit: прыжок или создание ---
+if tmux select-window -t '=lazygit' 2>/dev/null; then
+    sleep 0.2
+else
+    tmux new-window -n lazygit -c "$cwd" -e "XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-$HOME/.config}" lazygit
+    sleep 0.8   # дать lazygit подняться, прежде чем слать клавиши
+fi
+
+# --- встать на файл в Files (если он там есть) ---
+if [ -n "$file" ]; then
+    # путь относительно корня репо: поиск по НЕМУ, а не по basename —
+    # в реальных проектах basename неоднозначен (index.ts повсюду),
+    # и Enter селектил первое попавшееся
+    rel="${file#"$cwd"/}"
+    # файла нет в git-статусе → в Files его нет, селектить нечего
+    if ! git -C "$cwd" status --porcelain -- "$rel" 2>/dev/null | grep -q .; then
+        tmux display-message "в Files нет: $rel — файл без изменений"
+        exit 0
+    fi
+    lg="$(tmux list-panes -t '=lazygit' -F '#{pane_id}' | head -1)"
+    tmux send-keys -t "$lg" 2          # фокус на панель Files
+    sleep 0.1
+    tmux send-keys -t "$lg" /          # поиск в панели
+    sleep 0.1
+    printf '%s' "$rel" | tmux load-buffer -b lgs -
+    tmux paste-buffer -d -p -b lgs -t "$lg"
+    tmux send-keys -t "$lg" Enter
+    sleep 0.2
+    tmux send-keys -t "$lg" Escape     # снять фильтр (селект остаётся на файле)
+fi

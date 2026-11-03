@@ -1,0 +1,78 @@
+# yazi — Monokai Pro Spectrum, НЕЙТРАЛЬНО (в тон tmux-бару).
+# Основа — серые тона; акценты только там, где нужен смысл
+# (директории, поиск, маркеры выбора). Без радуги.
+
+[mgr]
+cwd = { fg = "#bab6c0" }                              # путь в тайтле — светло-серый, заметный, но не кричит
+
+preview_hovered = { underline = true }
+
+find_keyword  = { fg = "#fce566", bold = true }       # найденное — жёлтый (единственный «яркий»)
+find_position = { fg = "#69676c", italic = true }
+
+# маркеры выбора/копирования/вырезания — приглушённо
+marker_selected = { fg = "#7bd88f", bg = "#7bd88f" }
+marker_copied   = { fg = "#69676c", bg = "#69676c" }
+marker_cut      = { fg = "#fc618d", bg = "#fc618d" }
+
+count_selected = { fg = "#222222", bg = "#7bd88f" }
+count_copied   = { fg = "#222222", bg = "#69676c" }
+count_cut      = { fg = "#222222", bg = "#fc618d" }
+
+border_symbol = "│"
+border_style  = { fg = "#525053" }
+
+# строка под курсором (yazi ≥26: секция [indicator], а не [mgr].hovered)
+[indicator]
+parent  = { fg = "#f7f1ff", bg = "#363537" }   # тусклая серая полоса вместо инверсии
+current = { fg = "#f7f1ff", bg = "#363537" }
+preview = { underline = true }
+padding = { open = " ", close = " " }          # плоские концы-пробелы той же ширины, что капсулы — отступ не съезжает
+
+# табы: дефолт красит ANSI-«blue» (= оранжевый в Monokai Pro!) и рисует
+# скруглённые капсулы — заменяем на плоские серые блоки в тон бару
+[tabs]
+active    = { fg = "#f7f1ff", bg = "#525053", bold = true }
+inactive  = { fg = "#69676c" }
+sep_inner = { open = "", close = "" }
+sep_outer = { open = "", close = "" }
+
+[status]
+# убрать скруглённые powerline-концы у чипов режима/инфо → плоские
+sep_left  = { open = "", close = "" }
+sep_right = { open = "", close = "" }
+
+[mode]
+# индикатор режима — один спокойный серый блок, без цветовой чехарды
+normal_main = { fg = "#222222", bg = "#bab6c0", bold = true }
+normal_alt  = { fg = "#bab6c0", bg = "#525053" }
+select_main = { fg = "#222222", bg = "#fce566", bold = true }
+select_alt  = { fg = "#fce566", bg = "#525053" }
+unset_main  = { fg = "#222222", bg = "#69676c", bold = true }
+unset_alt   = { fg = "#69676c", bg = "#525053" }
+
+[filetype]
+rules = [
+  { url = "*/", fg = "#5ad4e6" },   # директории — мягкий cyan (единственное отличие)
+  { url = "*",  fg = "#f7f1ff" },   # файлы — базовый белый
+]
+
+# git-статусы (плагин git.yazi): цвет по смыслу, ignored — почти невидим
+[git]
+modified  = { fg = "#fce566", bold = true }   # изменён — yellow
+added     = { fg = "#7bd88f", bold = true }   # добавлен/staged — green
+untracked = { fg = "#7bd88f", bold = true }   # новый нетрекнутый — green
+deleted   = { fg = "#fc618d", bold = true }   # удалён — red
+updated   = { fg = "#fd9353", bold = true }   # обновлён/конфликт — orange
+ignored   = { fg = "#69676c" }   # .gitignore — приглушённый, но читаемый
+unknown   = { fg = "#525053" }
+
+modified_sign  = "M"
+added_sign     = "A"
+untracked_sign = "?"
+deleted_sign   = "D"
+updated_sign   = "U"
+ignored_sign   = "I"             # ignored: заметный значок
+clean_sign     = " "             # пробел (не пусто!) — иначе строки без статуса
+unknown_sign   = " "             # теряют ячейку значка и колонки съезжают на 2
+

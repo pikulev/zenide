@@ -1,0 +1,5 @@
+# Скопируй в git.local (под .gitignore) и заполни. Подключается из
+# ide/git/config через [include].
+[user]
+	name = Имя Фамилия
+	email = you@example.com

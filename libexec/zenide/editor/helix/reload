@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Хук session-window-changed (tmux.conf): при входе в окно, где живёт hx,
+# впрыснуть :reload-all — диск мог измениться (discard/edit hunk в lazygit,
+# git-команды в попапе), а autoread у hx нет (25.07.1).
+# Безопасно благодаря editor.auto-save.focus-lost: при уходе из hx буферы
+# уже записаны, reload ничего не теряет. Побочка: Escape выведет из INS,
+# а при живом [scratch]-буфере hx покажет безвредную ошибку reload.
+# $1 — window_id из формата хука (не полагаемся на «текущее окно» сервера).
+
+win="$1"
+[ -n "$win" ] || exit 0
+
+pane="$(tmux list-panes -t "$win" -F '#{pane_id} #{pane_current_command}' 2>/dev/null \
+        | awk '$2 == "hx" { print $1; exit }')"
+[ -n "$pane" ] || exit 0
+
+# zenide open только что сам открыл файл и переключил окно — его инъекция
+# и наша гонялись бы за командную строку hx (падало «reload-all» текстом
+# в буфер). Флаг снимаем и выходим: буфер и так свежий, с диска.
+if [ "$(tmux show -wv -t "$win" @hx_skip_reload 2>/dev/null)" = "1" ]; then
+    tmux set -w -t "$win" -u @hx_skip_reload
+    exit 0
+fi
+
+set -e
+. "$ZENIDE_LIBEXEC/lib/helix.sh"
+hx_begin
+hx_cmd reload-all

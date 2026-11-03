@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# C-Space D: попап «что поменялось в ханке под курсором hx».
+# Файл и СТРОКА добываются парсингом статусбара hx (как в jump.d/yazi;
+# строка — из токена позиции "12:5"). Показывается ханк git-диффа (HEAD),
+# накрывающий строку; если строка вне ханков — дифф файла целиком.
+# Дифф с ДИСКА: несохранённые правки буфера не видны (сначала :w).
+#
+# Строка ниже — источник для шпаргалки C-Space ? (zenide keys грепает `# keys:`).
+# keys: q выход · j/k скролл · / поиск (это less) · D вне ханков — весь дифф
+
+# ранние выходы: причина в самом попапе + ожидание клавиши
+# (display-message мелькает в статусбаре и выглядит как «попап сам закрылся»)
+die() {
+    printf '%s\n\n[нажми любую клавишу]' "$1"
+    read -r -n1 -s
+    exit 0
+}
+
+pane="$(tmux list-panes -s -F '#{pane_id} #{pane_current_command}' 2>/dev/null \
+        | awk '$2 == "hx" { print $1; exit }')"
+[ -n "$pane" ] || die "hx не найден в текущей сессии"
+cwd="$(tmux display-message -p -t "$pane" '#{pane_current_path}')"
+
+# файл и строка СФОКУСИРОВАННОГО сплита — через zenide ctx (инъекция
+# экспансий Helix: парсинг статусбара при сплитах hx брал не тот файл)
+file="" line=""
+ctx="$("$ZENIDE_ROOT/bin/zenide" ctx)"
+f="$(printf '%s\n' "$ctx" | sed -n 1p)"
+line="$(printf '%s\n' "$ctx" | sed -n 2p)"
+case "$f" in
+    /*) [ -e "$f" ] && file="$f" ;;
+    ?*) [ -e "$cwd/$f" ] && file="$cwd/$f" ;;
+esac
+
+# фолбэк — старый парсинг статусбара (hx не ответил на инъекцию)
+if [ -z "$file" ]; then
+    line=""
+    sl="$(tmux capture-pane -p -t "$pane" | grep -E '^ *(NOR|INS|SEL) ' | tail -1)"
+    for tok in $sl; do
+        case "$tok" in NOR|INS|SEL|'[+]'|'[RO]') continue ;; esac
+        if [ -z "$file" ] && [ -e "$cwd/$tok" ] && [ ! -d "$cwd/$tok" ]; then
+            file="$cwd/$tok"
+            continue
+        fi
+        case "$tok" in
+            [0-9]*:[0-9]*) line="${tok%%:*}" ;;
+        esac
+    done
+fi
+[ -n "$file" ] || die "файл не найден (ни через zenide ctx, ни в статусбаре)"
+
+cd "$cwd" || die "недоступен каталог $cwd"
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "не git-репозиторий: $cwd"
+
+diff="$(git diff HEAD --no-ext-diff -- "$file")"
+[ -n "$diff" ] || die "изменений в $file на ДИСКЕ нет
+(гуттер показывает правки буфера — сделай :w и повтори)"
+
+# ханк, накрывающий строку курсора (по +новым номерам из @@); нет — весь дифф
+printf '%s\n' "$diff" | awk -v L="${line:-0}" '
+    /^diff --git/ || /^index / || /^--- / || /^\+\+\+ / { hdr = hdr $0 ORS; next }
+    /^@@/ {
+        n++
+        match($0, /\+[0-9]+(,[0-9]+)?/)
+        split(substr($0, RSTART + 1, RLENGTH - 1), a, ",")
+        s = a[1]; c = (a[2] == "" ? 1 : a[2])
+        hit[n] = (L >= s && L < s + c)
+        hunk[n] = $0 ORS
+        next
+    }
+    n { hunk[n] = hunk[n] $0 ORS }
+    END {
+        any = 0
+        for (i = 1; i <= n; i++) if (hit[i]) any = 1
+        # шапка: сколько всего ханков и что показываем — видно, есть ли ЕЩЁ
+        # изменения в файле, когда курсор попал внутрь одного из ханков
+        if (any && n > 1)
+            printf "ханк под курсором · всего в файле: %d (D вне изменений — весь дифф)\n\n", n > "/dev/stderr"
+        else if (!any)
+            printf "весь дифф файла · ханков: %d\n\n", n > "/dev/stderr"
+        printf "%s", hdr
+        for (i = 1; i <= n; i++) if (!any || hit[i]) printf "%s", hunk[i]
+    }' 2>&1 \
+| LESS='-R' DELTA_PAGER='less -R' delta --dark --line-numbers \
+      --syntax-theme="Monokai Extended"
+# LESS/DELTA_PAGER без -F: less -F закрывает попап мгновенно,
+# если ханк влез в один экран (а он почти всегда влезает)

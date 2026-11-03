@@ -1,0 +1,107 @@
+#!/usr/bin/env sh
+# zenide — единственная точка входа. Всё остальное живёт подкомандами в
+# libexec/zenide/ и зовётся отсюда.
+#
+# Зачем диспетчер, а не десяток скриптов по путям: конфиг tmux становится
+# декларацией (`display-popup -E "… zenide blame"`, а не путь к файлу), мост
+# перестаёт зависеть от tmux (`zenide open файл:строка` работает из шелла, из
+# yazi, из lazygit), и появляется место для `help`/`doctor`/`--version`.
+#
+# Списка подкоманд внутри НЕТ — он выводится из файлов libexec (как справка
+# C-Space ? выводится из живого tmux). Добавил файл — подкоманда появилась.
+set -u
+
+# ── где мы ─────────────────────────────────────────────
+# $0 почти всегда симлинк (~/.local/bin/zenide или ~/.config/zenide/bin/zenide),
+# поэтому разворачиваем цепочку сами: readlink -f есть не на всех macOS.
+self="$0"
+while [ -L "$self" ]; do
+    link="$(readlink "$self")"
+    case "$link" in
+    /*) self="$link" ;;
+    *)  self="$(dirname "$self")/$link" ;;
+    esac
+done
+ZENIDE_ROOT="$(cd "$(dirname "$self")/.." && pwd -P)"
+ZENIDE_LIBEXEC="$ZENIDE_ROOT/libexec/zenide"
+# Профиль ищется СНАРУЖИ клона: личное должно переживать снос и переустановку
+# репозитория, а форкеру — не конфликтовать с апстримом на `git pull`.
+# Три ступени, первая подходящая выигрывает:
+#   1. $ZENIDE_PROFILE — задаёт лаунчер (./try, тесты, запись демо);
+#   2. якорь ~/.config/zenide-profile — его ставит install.sh (симлинком на
+#      profile/ в клоне или реальным каталогом — это выбор пользователя);
+#   3. profile/ в клоне — машина, где install.sh ещё не отработал.
+# Ступень 3 нужна, чтобы `zenide` работал прямо из свежего клона.
+if [ -z "${ZENIDE_PROFILE:-}" ]; then
+    _anchor="${XDG_CONFIG_HOME:-$HOME/.config}/zenide-profile"
+    if [ -d "$_anchor" ]; then
+        ZENIDE_PROFILE="$_anchor"
+    else
+        ZENIDE_PROFILE="$ZENIDE_ROOT/profile"
+    fi
+    unset _anchor
+fi
+export ZENIDE_ROOT ZENIDE_LIBEXEC ZENIDE_PROFILE
+
+# дефолты ядра + личный профиль поверх (editor, git_tui, modules…)
+. "$ZENIDE_LIBEXEC/lib/profile.sh"
+
+# ── перечисление подкоманд ─────────────────────────────
+# Описание берём из первой комментарной строки после shebang — второго места
+# для этих данных нет, рассинхрон невозможен.
+list_commands() {
+    for f in "$ZENIDE_LIBEXEC"/* "$ZENIDE_LIBEXEC/editor/$ZENIDE_EDITOR"/*; do
+        [ -f "$f" ] || continue
+        [ -x "$f" ] || continue
+        case "${f##*/}" in *.md) continue ;; esac
+        desc="$(sed -n '2s/^#[[:space:]]*//p' "$f")"
+        printf '  %-10s %s\n' "${f##*/}" "$desc"
+    done
+}
+
+usage() {
+    cat <<EOF
+zenide — модульная терминальная IDE: helix в центре, tmux как шина.
+
+Использование: zenide <подкоманда> [аргументы…]
+
+Подкоманды:
+$(list_commands)
+
+  help       эта справка
+  version    версия и пути
+
+Клавиши сетапа — C-Space ? (это \`zenide keys\`).
+EOF
+}
+
+cmd="${1:-help}"
+[ $# -gt 0 ] && shift
+
+case "$cmd" in
+help | -h | --help)
+    usage
+    exit 0
+    ;;
+version | --version)
+    printf 'zenide %s\n' "$(cat "$ZENIDE_ROOT/VERSION" 2>/dev/null || echo 'dev')"
+    printf 'root    %s\n' "$ZENIDE_ROOT"
+    printf 'profile %s\n' "$ZENIDE_PROFILE"
+    printf 'editor  %s\n' "$ZENIDE_EDITOR"
+    exit 0
+    ;;
+esac
+
+# ── маршрутизация ──────────────────────────────────────
+# Сначала общие подкоманды, затем слот редактора: open/ctx/reload/goto — это
+# ЕГО четыре операции, и для другого редактора менялся бы только этот каталог.
+if [ -x "$ZENIDE_LIBEXEC/$cmd" ]; then
+    exec "$ZENIDE_LIBEXEC/$cmd" "$@"
+fi
+if [ -x "$ZENIDE_LIBEXEC/editor/$ZENIDE_EDITOR/$cmd" ]; then
+    exec "$ZENIDE_LIBEXEC/editor/$ZENIDE_EDITOR/$cmd" "$@"
+fi
+
+printf 'zenide: нет подкоманды «%s»\n\n' "$cmd" >&2
+usage >&2
+exit 2

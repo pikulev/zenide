@@ -1,0 +1,38 @@
+// gitui theme — Catppuccin Mocha
+//
+// Only override the values you want; anything omitted uses gitui's default.
+// Colors accept named colors ("Blue"), hex ("#cba6f7"), or ratatui Color values.
+// Valid keys are defined in src/ui/style.rs (Theme struct).
+//
+// Catppuccin Mocha palette reference:
+//   base #1e1e2e  mantle #181825  surface1 #45475a  surface2 #585b70
+//   overlay1 #7f849c  text #cdd6f4  subtext1 #bac2de
+//   red #f38ba8  maroon #eba0ac  peach #fab387  yellow #f9e2af
+//   green #a6e3a1  teal #94e2d5  sky #89dceb  blue #89b4fa
+//   lavender #b4befe  mauve #cba6f7
+(
+    selected_tab:        Some("#cba6f7"),  // mauve — active tab underline
+    command_fg:          Some("#cdd6f4"),  // text — bottom command bar
+    selection_bg:        Some("#585b70"),  // surface2 — selected row bg
+    selection_fg:        Some("#cdd6f4"),  // text
+    use_selection_fg:    Some(false),      // keep colored items colored when selected
+    cmdbar_bg:           Some("#181825"),  // mantle
+    disabled_fg:         Some("#7f849c"),  // overlay1 — unfocused blocks / hints
+
+    diff_line_add:       Some("#a6e3a1"),  // green
+    diff_line_delete:    Some("#f38ba8"),  // red
+    diff_file_added:     Some("#a6e3a1"),  // green
+    diff_file_removed:   Some("#eba0ac"),  // maroon
+    diff_file_moved:     Some("#cba6f7"),  // mauve
+    diff_file_modified:  Some("#fab387"),  // peach
+
+    commit_hash:         Some("#b4befe"),  // lavender
+    commit_time:         Some("#bac2de"),  // subtext1
+    commit_author:       Some("#89dceb"),  // sky
+
+    danger_fg:           Some("#f38ba8"),  // red — destructive actions
+    push_gauge_bg:       Some("#89b4fa"),  // blue
+    push_gauge_fg:       Some("#1e1e2e"),  // base
+    tag_fg:              Some("#f9e2af"),  // yellow
+    branch_fg:           Some("#94e2d5"),  // teal
+)

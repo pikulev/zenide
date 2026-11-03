@@ -1,0 +1,35 @@
+# Минимум, который нужен, чтобы lazygit отдавал файлы в работающий hx.
+# Врежь в свой ~/.config/lazygit/config.yml — полный ide/lazygit/ ставить не
+# обязательно (там ещё тема, delta-пейджер и раскладка).
+#
+# Это слой `slot`: без него lazygit прекрасно работает сам по себе, просто
+# «открыть файл» поднимет отдельный редактор мимо шины zenide.
+
+os:
+  # `e` отдаёт файл в УЖЕ работающий hx текущей tmux-сессии. Вне tmux моста
+  # нет, поэтому блокирующий hx прямо поверх lazygit; :q вернёт обратно.
+  edit: >-
+    if [ -n "$TMUX" ]; then
+
+
+      "${ZENIDE_ROOT:-$HOME/.config/zenide}/bin/zenide" open "{{filename}}";
+    else
+
+
+      hx -- {{filename}};
+    fi
+  editAtLine: >-
+    if [ -n "$TMUX" ]; then
+
+
+      "${ZENIDE_ROOT:-$HOME/.config/zenide}/bin/zenide" open "{{filename}}" "{{line}}";
+    else
+
+
+      hx -- {{filename}}:{{line}};
+    fi
+  # Блокирующие правки (E «edit hunk»): lazygit пишет патч во временный файл и
+  # ЖДЁТ выхода редактора — слать в работающий hx нельзя, мост возвращает
+  # управление сразу и lazygit прочитал бы патч неизменённым.
+  editAtLineAndWait: hx -- {{filename}}:{{line}}
+  editInTerminal: false

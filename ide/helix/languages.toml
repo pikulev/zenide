@@ -1,0 +1,60 @@
+# Пер-языковые настройки Helix.
+# LSP-сервера (дефолты hx, просто должны быть в PATH):
+#   web  → typescript-language-server, vscode-json-language-server
+#   c++  → clangd (/usr/bin, из Xcode CLT)
+#   rust → rust-analyzer (~/.cargo/bin)
+#   py   → ty (типы, Astral) + ruff (линт+формат)
+#   bash → bash-language-server (+shellcheck внутри)
+#   md   → marksman
+
+# ── web: формат ТОЛЬКО руками (:format), автоформата на :w нет ──
+# --stdin-filepath вместо --parser: парсер prettier выберет по расширению
+# сам, а главное — увидит путь файла и подхватит .prettierrc/.editorconfig
+# проекта. С голым --parser файл шёл в stdin «безымянным», конфиг проекта
+# не находился и всё форматировалось дефолтами prettier.
+# Дефолты, когда конфига в проекте нет, задаёт ~/.prettierrc
+# (config/prettier/prettierrc.json).
+[[language]]
+name = "typescript"
+formatter = { command = "prettier", args = ["--stdin-filepath", "%{buffer_name}"] }
+
+[[language]]
+name = "tsx"
+formatter = { command = "prettier", args = ["--stdin-filepath", "%{buffer_name}"] }
+
+[[language]]
+name = "javascript"
+formatter = { command = "prettier", args = ["--stdin-filepath", "%{buffer_name}"] }
+
+[[language]]
+name = "jsx"
+formatter = { command = "prettier", args = ["--stdin-filepath", "%{buffer_name}"] }
+
+[[language]]
+name = "json"
+formatter = { command = "prettier", args = ["--stdin-filepath", "%{buffer_name}"] }
+
+# ── python: ruff форматирует через LSP, просто включаем on-save ──
+[[language]]
+name = "python"
+auto-format = true
+
+# ── bash: формат руками (:format), автоформат скриптов опасен ──
+[[language]]
+name = "bash"
+formatter = { command = "shfmt", args = ["-i", "4"] }
+
+# ── c/c++: формат руками, стиль диктует проект (.clang-format) ──
+[[language]]
+name = "c"
+formatter = { command = "clang-format" }
+
+[[language]]
+name = "cpp"
+formatter = { command = "clang-format" }
+
+# ── markdown: мягкий перенос + формат руками ───────────
+[[language]]
+name = "markdown"
+soft-wrap.enable = true
+formatter = { command = "prettier", args = ["--stdin-filepath", "%{buffer_name}"] }

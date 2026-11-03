@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Печатает контекст СФОКУСИРОВАННОГО буфера hx текущей сессии:
+#   строка 1 — файл (как его знает hx: обычно относительно его cwd)
+#   строка 2 — номер строки курсора
+# Способ: безопасная выгрузка экспансий hx через quoted heredoc (они знают
+# именно сфокусированный сплит) — надёжнее парсинга статусбара, который
+# при сплитах видит несколько статуслайнов и не умеет определить фокус.
+# Доставка — как в zenide open (Escape + пауза, тело bracketed paste).
+# Побочка: Escape выведет hx из INS; в командной строке мигнёт команда.
+
+pane="$(tmux list-panes -s -F '#{pane_id} #{pane_current_command}' 2>/dev/null \
+        | awk '$2 == "hx" { print $1; exit }')"
+[ -n "$pane" ] || exit 1
+
+set -e
+. "$ZENIDE_LIBEXEC/lib/helix.sh"
+hx_begin
+# Данные попадают в quoted heredoc: shell не исполняет $, кавычки и backticks.
+# Случайный разделитель не зависит от имени файла. %u{a} создаёт переводы
+# строки ПОСЛЕ разбора промпта Helix, поэтому команда остаётся одной строкой.
+tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/zenide-ctx.XXXXXXXXXXXX")"
+trap 'hx_finish; rm -rf "$tmpdir"' EXIT
+out="$tmpdir/context"
+delimiter="ZENIDE_${tmpdir##*.}"
+quoted="$(printf '%s' "$out" | sed "s/'/'\\\\''/g")"
+quoted="${quoted//%/%%}"
+hx_cmd "sh cat > '$quoted' <<'$delimiter'%u{a}%{buffer_name}%u{a}%{cursor_line}%u{a}$delimiter"
+
+for _ in $(seq 1 30); do
+    if [ -f "$out" ] && [ "$(wc -l < "$out")" -ge 2 ]; then
+        # Контракт ctx двухстрочный; многострочные имена не выдаём частично.
+        [ "$(wc -l < "$out")" -eq 2 ] || exit 1
+        f="$(sed -n 1p "$out")"
+        line="$(sed -n 2p "$out")"
+        case "$line" in ''|*[!0-9]*) exit 1 ;; esac
+        case "$f" in "~/"*) f="$HOME/${f#"~/"}" ;; esac
+        printf '%s\n%s\n' "$f" "$line"
+        exit 0
+    fi
+    sleep 0.05
+done
+printf 'zenide ctx: редактор не ответил\n' >&2
+exit 1

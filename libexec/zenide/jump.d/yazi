@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# C-Space E: открыть yazi на каталоге ТЕКУЩЕГО файла hx, курсор — на самом файле.
+# Файл добываем через zenide ctx (экспансия %{buffer_name} знает
+# СФОКУСИРОВАННЫЙ сплит; парсинг статусбара при сплитах промахивался).
+# Фолбэк — старый парсинг статусбара, затем просто cwd пейна.
+
+pane="$(tmux list-panes -s -F '#{pane_id} #{pane_current_command}' 2>/dev/null \
+        | awk '$2 == "hx" { print $1; exit }')"
+if [ -z "$pane" ]; then
+    tmux display-message "hx не найден в текущей сессии"
+    exit 0
+fi
+cwd="$(tmux display-message -p -t "$pane" '#{pane_current_path}')"
+
+target="$cwd"
+
+# основной канал: спросить hx напрямую
+file="$("$ZENIDE_ROOT/bin/zenide" ctx | head -1)"
+case "$file" in
+    /*)  [ -e "$file" ] && target="$file" ;;
+    ?*)  [ -e "$cwd/$file" ] && target="$cwd/$file" ;;
+esac
+
+# фолбэк: парсинг статусбара (как раньше; работает без сплитов)
+if [ "$target" = "$cwd" ]; then
+    sl="$(tmux capture-pane -p -t "$pane" | grep -E '^ *(NOR|INS|SEL) ' | tail -1)"
+    for tok in $sl; do
+        case "$tok" in NOR|INS|SEL|'[+]'|'[RO]') continue ;; esac
+        if [ -e "$cwd/$tok" ]; then
+            target="$cwd/$tok"
+            break
+        fi
+    done
+fi
+
+# DDS направляет действие существующему экземпляру: вкладки и фоновые
+# операции yazi сохраняются. Старые окна без id не убиваем автоматически.
+root="$(tmux display-message -p '#{session_path}')"
+if tmux select-window -t '=yazi' 2>/dev/null; then
+    win="$(tmux display-message -p '#{window_id}')"
+    id="$(tmux show -wv -t "$win" @zenide_yazi_id 2>/dev/null)"
+    if [ -n "$id" ] && command -v ya >/dev/null 2>&1; then
+        ya emit-to "$id" reveal "$target"
+    else
+        tmux display-message 'для прыжка нужен ya и окно yazi с id; закрой yazi через q и открой заново'
+    fi
+else
+    . "$ZENIDE_LIBEXEC/lib/yazi.sh"
+    yazi_start "$root" "$target"
+fi

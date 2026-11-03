@@ -1,0 +1,48 @@
+# ГЛОБАЛЬНЫЙ конфиг mise: рантаймы и языковые CLI одной декларацией.
+# Слой `global` в ide/LAYERS — меняет версии тулов ВО ВСЕХ проектах машины,
+# поэтому install.sh ставит его только поимённо (`--with mise`), и в `--with
+# all` он не входит.
+#
+# Почему личные пины живут в публичном репозитории, а не в profile/: mise
+# читает РОВНО `~/.config/mise/config.toml`, переменные в путях не
+# раскрываются — ровно та же причина, по которой литеральный путь стоит в
+# ide/git/config. Личное поверх этого файла, если понадобится, кладётся
+# в `~/.config/mise/config.override.toml` (он главнее любого проектного
+# конфига и в репозитории его нет).
+#
+# Применить после правки: `mise install` (а дальше `mise reshim`, если
+# добавлял npm:/pypi:-тул — иначе новой команды не будет в шимах).
+
+[tools]
+# Первая версия в списке — дефолтная, остальные доступны проектам по
+# `mise.toml`/`.node-version`. Это весь бывший блок `proto pin … --to global`.
+#
+# ВАЖНО: `engines` из package.json mise НЕ читает (это про совместимость
+# пакета, а не про версию для разработки) — читается только
+# `devEngines.runtime`. Проектам со старым `engines` версию придётся назвать
+# явно: `mise use node@18` в каталоге проекта. См. docs/pitfalls.md.
+node = ["24.14.1", "18.20.8"]
+pnpm = "latest"
+bun = "latest"
+
+# npm-бэкенд: каждый CLI ставится в СВОЙ каталог и не привязан к активной
+# версии node. Из-за отсутствия этого свойства у proto существовал
+# shell/parts/node.sh (выкладывал на PATH $(npm prefix)/bin каждой версии)
+# и грабля «LSP пропал после переключения node».
+"npm:typescript" = "latest"
+"npm:typescript-language-server" = "latest"
+"npm:vscode-langservers-extracted" = "latest"  # css/html/json/markdown/eslint
+"npm:bash-language-server" = "latest"
+"npm:prettier" = "latest"
+"npm:diff2html-cli" = "latest"                 # shell/parts/diff2html.sh
+
+# python-тулинг. Сам `uv` остаётся на brew: он нужен для venv и `uv run`
+# в проектах, а не как менеджер этих двух CLI.
+"pypi:ruff" = "latest"
+"pypi:ty" = "latest"
+
+[settings]
+# Обёртка над bin/npm, которая сама дёргает `mise reshim` после `npm i -g`:
+# без неё свежепоставленный глобальный CLI не появляется в шимах, и это
+# выглядит как «команда установилась, но её нет».
+node.npm_shim = true

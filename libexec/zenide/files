@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# Фаззи-пикер файлов проекта в попапе → открыть в РАБОТАЮЩЕМ hx.
+# Вызов из tmux: bind o display-popup -E -d "#{session_path}" … zenide files
+# Попап стартует с cwd = корень проекта (session_path), поэтому $PWD = корень.
+#
+# --scheme=path: fzf даёт бонус совпадениям после «/» → ИМЕНА ФАЙЛОВ
+# всплывают над совпадениями по имени каталога (лечит неудобный Space f в hx).
+# fd БЕЗ -a: относительные пути → чистые матч и вид; перед `zenide open` разворот в
+# абсолют $PWD/$sel (`zenide open` релятивизует к cwd hx устойчиво).
+#
+# Гибкость — ЖИВЫЕ тумблеры в попапе (параллель к rga-поиску zenide grep):
+#   alt-h  hidden:  yes ↔ no   — показывать скрытые (fd --hidden)
+#   alt-i  ignored: no ↔ yes    — показывать .gitignored (fd --no-ignore)
+#   alt-d  scope:   каталог     — ограничить поддеревом (fd --search-path)
+# Список даёт fd (один раз на состояние), fzf фаззит интерактивно; тумблер
+# перезапускает fd через reload(), запрос сохраняется. Состояние — в tmpdir
+# (файл на тумблер) + мелкие скрипты run/hdr/toggle/setdir там же (без ада
+# экранирования в --bind: fzf зовёт файлы). .git исключён всегда.
+#
+# Строка ниже — источник для шпаргалки C-Space ? (zenide keys грепает `# keys:`).
+# Главный хедер попапа её не переиспользует: он динамический, рисует состояние
+# тумблеров, а не их описание.
+# keys: alt-h скрытые · alt-i gitignored · alt-d scope · Enter файл → hx
+
+export HXF_STATE="$(mktemp -d "${TMPDIR:-/tmp}/zenide-files.XXXXXX")"
+trap 'rm -rf "$HXF_STATE"' EXIT
+
+# ── начальное состояние ────────────────────────────────
+echo yes > "$HXF_STATE/hidden"   # yes | no  — скрытые файлы (дефолт: показывать)
+echo no  > "$HXF_STATE/ignored"  # no | yes  — .gitignored (дефолт: уважать .gitignore)
+: > "$HXF_STATE/dir"             # пусто = весь проект; иначе каталог-поддерево
+
+# ── список файлов: читает состояние ────────────────────
+# --search-path подключаем ТОЛЬКО при scope: без него fd даёт чистые пути,
+# с `--search-path .` fd префиксит './' (грязнит вид и ранжирование).
+cat > "$HXF_STATE/run" <<'RUN'
+#!/usr/bin/env sh
+set -f
+hid=--hidden; [ "$(cat "$HXF_STATE/hidden")" = no ] && hid=
+ign=; [ "$(cat "$HXF_STATE/ignored")" = yes ] && ign=--no-ignore
+dir="$(cat "$HXF_STATE/dir")"
+sp=; [ -n "$dir" ] && sp="--search-path $dir"
+# shellcheck disable=SC2086
+fd --type f $hid $ign --exclude .git $sp 2>/dev/null
+RUN
+chmod +x "$HXF_STATE/run"
+
+# ── шапка: легенда + текущие тумблеры ──────────────────
+cat > "$HXF_STATE/hdr" <<'HDR'
+#!/usr/bin/env sh
+d="$(cat "$HXF_STATE/dir")"; [ -n "$d" ] || d='весь проект'
+printf 'alt-h hidden:%s   alt-i ignored:%s   alt-d scope:%s' \
+  "$(cat "$HXF_STATE/hidden")" "$(cat "$HXF_STATE/ignored")" "$d"
+HDR
+chmod +x "$HXF_STATE/hdr"
+
+# ── тумблеры (читаем, потом пишем) ─────────────────────
+cat > "$HXF_STATE/toggle" <<'TOG'
+#!/usr/bin/env sh
+case "$1" in
+  hidden)  [ "$(cat "$HXF_STATE/hidden")" = yes ] && new=no || new=yes; echo "$new" > "$HXF_STATE/hidden" ;;
+  ignored) [ "$(cat "$HXF_STATE/ignored")" = yes ] && new=no || new=yes; echo "$new" > "$HXF_STATE/ignored" ;;
+esac
+TOG
+chmod +x "$HXF_STATE/toggle"
+
+# ── ввод scope: вложенный fzf (execute() даёт полный tty) ──
+# Голый read не умел line-editing (стрелки сыпали escape-байты в поток).
+# fzf даёт: рабочие стрелки, живые кандидаты-каталоги (fd --type d), фаззи,
+# историю (--history, персистент вне ephemeral-стейта → переживает попап).
+# Сентинел «· весь проект ·» сбрасывает scope; Esc — отмена (dir не трогаем).
+cat > "$HXF_STATE/setdir" <<'SD'
+#!/usr/bin/env sh
+hist="${XDG_STATE_HOME:-$HOME/.local/state}/hx-picker"; mkdir -p "$hist" 2>/dev/null
+histf="$hist/files-scope"   # история ВЫБРАННЫХ значений (fzf --history хранил бы запрос)
+# кандидаты-каталоги уважают текущие тумблеры hidden/ignored (как основной список)
+hid=--hidden; [ "$(cat "$HXF_STATE/hidden")" = no ] && hid=
+ign=; [ "$(cat "$HXF_STATE/ignored")" = yes ] && ign=--no-ignore
+# список = недавние выборы (сверху, у курсора) + каталоги + сентинел, без дублей
+sel="$(
+  { cat "$histf" 2>/dev/null; fd --type d $hid $ign --exclude .git; printf '%s\n' '· весь проект ·'; } \
+    | awk 'NF && !seen[$0]++' \
+    | fzf --prompt 'scope ❯ ' \
+          --header 'сверху недавние · ↑↓/C-p выбор · набери для фильтра · Esc отмена'
+)" || exit 0
+[ "$sel" = '· весь проект ·' ] && sel=
+printf '%s' "$sel" > "$HXF_STATE/dir"
+# запомнить ВЫБРАННОЕ значение: первым, без дублей, максимум 50
+if [ -n "$sel" ]; then
+  tmp="$(mktemp)"; { printf '%s\n' "$sel"; grep -vxF "$sel" "$histf" 2>/dev/null; } | head -n 50 > "$tmp"; mv "$tmp" "$histf"
+fi
+SD
+chmod +x "$HXF_STATE/setdir"
+
+# ── попап ──────────────────────────────────────────────
+sel="$(
+  : | fzf --scheme=path --prompt 'open ❯ ' \
+    --header-first --header "$("$HXF_STATE/hdr")" \
+    --bind "start:reload:$HXF_STATE/run" \
+    --bind "alt-h:execute-silent($HXF_STATE/toggle hidden)+transform-header($HXF_STATE/hdr)+reload($HXF_STATE/run)" \
+    --bind "alt-i:execute-silent($HXF_STATE/toggle ignored)+transform-header($HXF_STATE/hdr)+reload($HXF_STATE/run)" \
+    --bind "alt-d:execute($HXF_STATE/setdir)+transform-header($HXF_STATE/hdr)+reload($HXF_STATE/run)"
+)" || exit 0
+
+[ -n "$sel" ] && exec "$ZENIDE_ROOT/bin/zenide" open "$PWD/$sel"

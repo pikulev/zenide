@@ -1,0 +1,8 @@
+# Личные/рабочие корни проектов. Скопируй в projects.local — тот под
+# .gitignore и в публичную историю не попадает.
+#
+# Добавлять к уже набранному в projects.conf — через +=, а не =.
+
+# containers+=("$HOME/code/work-monorepo")
+# roots+=("$HOME/work")
+# standalone+=("$HOME/some/single-repo")

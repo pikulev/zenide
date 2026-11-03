@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+# Live-grep по проекту через ripgrep-all (rga) в попапе → открыть совпадение в hx.
+# rga = ripgrep + адаптеры: ищет ТЕКСТ внутри PDF, Office (docx/xlsx/pptx),
+# zip/tar.gz, sqlite, EXIF и т.п. — не только в исходниках.
+# Вызов: bind / display-popup -E -d "#{session_path}" … zenide grep [запрос]
+# Попап стартует с cwd = корень проекта (session_path) → $PWD = корень.
+#
+# Гибкость — ЖИВЫЕ тумблеры прямо в попапе (не отдельные бинды tmux):
+#   alt-c  case: smart → ignore → sensitive → …   (по кругу)
+#   alt-i  ignored: no ↔ yes  (искать и в .gitignored — --no-ignore)
+#   alt-d  scope: путь/глоб (пусто = весь проект)  — читается интерактивно
+# Текущее состояние видно в шапке; переключение сразу перезапускает поиск.
+#
+# Реализация: состояние в tmpdir (по файлу на тумблер), а команды поиска/шапки/
+# тумблеров — маленькие скрипты там же. Это убирает ад экранирования в --bind:
+# fzf зовёт файлы, а не инлайн-sh с вложенными кавычками.
+#
+# Строка ниже — источник для шпаргалки C-Space ? (zenide keys грепает `# keys:`).
+# Главный хедер попапа её не переиспользует: он динамический, рисует состояние
+# тумблеров, а не их описание.
+# keys: alt-c case · alt-i gitignored · alt-d scope/глоб · Enter файл:строка → hx
+
+export RGA_STATE="$(mktemp -d "${TMPDIR:-/tmp}/zenide-grep.XXXXXX")"
+trap 'rm -rf "$RGA_STATE"' EXIT
+
+# ── начальное состояние ────────────────────────────────
+echo smart > "$RGA_STATE/case"      # smart | ignore | sensitive
+echo no    > "$RGA_STATE/ignored"   # no | yes  — искать и в игнорируемых
+: > "$RGA_STATE/dir"                 # пусто = весь проект; иначе путь или глоб
+
+# ── команда поиска: читает состояние, $1 = запрос ──────
+# Пустой запрос → тишина (иначе пустой паттерн rg матчит ВСЁ).
+# --hidden -g'!.git' всегда: покрытие как у пикера файлов o (скрытые кроме .git).
+cat > "$RGA_STATE/run" <<'RUN'
+#!/usr/bin/env sh
+set -f                              # без pathname-раскрытия: глоб '*.md' уйдёт в rga как есть
+q="$1"; [ -n "$q" ] || exit 0
+case "$(cat "$RGA_STATE/case")" in
+  ignore)    c=--ignore-case ;;
+  sensitive) c=--case-sensitive ;;
+  *)         c=--smart-case ;;
+esac
+ign=; [ "$(cat "$RGA_STATE/ignored")" = yes ] && ign=--no-ignore
+dir="$(cat "$RGA_STATE/dir")"
+gscope= ; pscope=
+if [ -n "$dir" ]; then
+  case "$dir" in
+    *[*?]*) gscope="-g $dir" ;;  # глоб (есть * или ?) → фильтр -g (ДО --, это флаг)
+    *)      pscope="$dir" ;;     # путь (каталог/файл) → позиционный аргумент (ПОСЛЕ --)
+  esac
+fi
+# намеренное словоделение $c/$ign/$gscope/$pscope — значения без пробелов;
+# -g/скоуп-глоб обязан идти до `--`, иначе rga примет его за путь.
+# shellcheck disable=SC2086
+rga --column --line-number --no-heading --color=always $c --hidden -g '!.git' $ign $gscope -- "$q" $pscope 2>/dev/null
+RUN
+chmod +x "$RGA_STATE/run"
+
+# ── шапка: легенда + текущие тумблеры ──────────────────
+cat > "$RGA_STATE/hdr" <<'HDR'
+#!/usr/bin/env sh
+d="$(cat "$RGA_STATE/dir")"; [ -n "$d" ] || d='весь проект'
+printf 'alt-c case:%s   alt-i ignored:%s   alt-d scope:%s' \
+  "$(cat "$RGA_STATE/case")" "$(cat "$RGA_STATE/ignored")" "$d"
+HDR
+chmod +x "$RGA_STATE/hdr"
+
+# ── тумблеры case / ignored (читаем, потом пишем — иначе редирект затрёт вход) ──
+cat > "$RGA_STATE/toggle" <<'TOG'
+#!/usr/bin/env sh
+case "$1" in
+  case)
+    cur="$(cat "$RGA_STATE/case")"
+    case "$cur" in smart) new=ignore ;; ignore) new=sensitive ;; *) new=smart ;; esac
+    echo "$new" > "$RGA_STATE/case" ;;
+  ignored)
+    [ "$(cat "$RGA_STATE/ignored")" = yes ] && new=no || new=yes
+    echo "$new" > "$RGA_STATE/ignored" ;;
+esac
+TOG
+chmod +x "$RGA_STATE/toggle"
+
+# ── ввод scope: вложенный fzf (execute() даёт полный tty) ──
+# Голый read не умел line-editing (стрелки сыпали escape-байты в поток).
+# fzf: рабочие стрелки, живые кандидаты-каталоги, фаззи, история (--history).
+# --print-query: глоб (*.rs), которого нет среди каталогов, берётся из ввода
+# (line1=запрос, line2=выбранный каталог; выбор приоритетнее). Esc (rc 130) —
+# отмена; сентинел «· весь проект ·» сбрасывает scope.
+cat > "$RGA_STATE/setdir" <<'SD'
+#!/usr/bin/env sh
+hist="${XDG_STATE_HOME:-$HOME/.local/state}/hx-picker"; mkdir -p "$hist" 2>/dev/null
+histf="$hist/search-scope"   # история ВЫБРАННЫХ значений (каталоги/глобы), не запросов
+# кандидаты-каталоги уважают текущий тумблер ignored (как основной список)
+ign=; [ "$(cat "$RGA_STATE/ignored")" = yes ] && ign=--no-ignore
+# список = недавние выборы (сверху, у курсора) + каталоги + сентинел, без дублей
+out="$(
+  { cat "$histf" 2>/dev/null; fd --type d --hidden --exclude .git $ign; printf '%s\n' '· весь проект ·'; } \
+    | awk 'NF && !seen[$0]++' \
+    | fzf --print-query --prompt 'scope ❯ ' \
+          --header 'сверху недавние · ↑↓/C-p · глоб (*.rs) набери+Enter · Esc отмена'
+)"; rc=$?
+[ "$rc" = 130 ] && exit 0
+sel="$(printf '%s\n' "$out" | sed -n 2p)"
+qry="$(printf '%s\n' "$out" | sed -n 1p)"
+val="${sel:-$qry}"
+[ "$val" = '· весь проект ·' ] && val=
+printf '%s' "$val" > "$RGA_STATE/dir"
+# запомнить ВЫБРАННОЕ значение (каталог ИЛИ глоб): первым, без дублей, максимум 50
+if [ -n "$val" ]; then
+  tmp="$(mktemp)"; { printf '%s\n' "$val"; grep -vxF "$val" "$histf" 2>/dev/null; } | head -n 50 > "$tmp"; mv "$tmp" "$histf"
+fi
+SD
+chmod +x "$RGA_STATE/setdir"
+
+# ── попап ──────────────────────────────────────────────
+sel="$(
+  : | fzf \
+    --ansi --disabled --query "${1:-}" \
+    --prompt 'rga ❯ ' --delimiter : \
+    --header-first --header "$("$RGA_STATE/hdr")" \
+    --bind "start:reload:$RGA_STATE/run {q}" \
+    --bind "change:reload:$RGA_STATE/run {q}" \
+    --bind "alt-c:execute-silent($RGA_STATE/toggle case)+transform-header($RGA_STATE/hdr)+reload($RGA_STATE/run {q})" \
+    --bind "alt-i:execute-silent($RGA_STATE/toggle ignored)+transform-header($RGA_STATE/hdr)+reload($RGA_STATE/run {q})" \
+    --bind "alt-d:execute($RGA_STATE/setdir)+transform-header($RGA_STATE/hdr)+reload($RGA_STATE/run {q})" \
+    --preview 'rga --passthru --line-number --no-heading --color=always --smart-case -- {q} {1} 2>/dev/null' \
+    --preview-window 'up,60%,border-bottom,+{2}/2'
+)" || exit 0
+
+[ -n "$sel" ] || exit 0
+file="${sel%%:*}"
+rest="${sel#*:}"
+line="${rest%%:*}"
+# не-числовая «строка» (напр. «Page 3» из PDF) → открыть файл без goto
+case "$line" in ''|*[!0-9]*) line="" ;; esac
+exec "$ZENIDE_ROOT/bin/zenide" open "$PWD/$file" "$line"

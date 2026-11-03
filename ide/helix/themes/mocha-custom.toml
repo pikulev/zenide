@@ -1,0 +1,16 @@
+# Кастомная тема поверх встроенной Catppuccin Mocha.
+# Меняем только статусбар — всё остальное берётся из родителя.
+inherits = "catppuccin_mocha"
+
+# Бар вне режимной окраски (фон + неактивное окно)
+"ui.statusline"           = { fg = "#cdd6f4", bg = "#181825" }          # text / mantle
+"ui.statusline.inactive"  = { fg = "#6c7086", bg = "#181825" }          # overlay0 / mantle
+
+# Окраска ВСЕГО бара по режиму (работает благодаря color-modes = true).
+# Тёмный жирный текст на цветном фоне — сразу видно, в каком ты режиме.
+"ui.statusline.normal"    = { fg = "#11111b", bg = "#89b4fa", modifiers = ["bold"] }  # crust / blue
+"ui.statusline.insert"    = { fg = "#11111b", bg = "#a6e3a1", modifiers = ["bold"] }  # crust / green
+"ui.statusline.select"    = { fg = "#11111b", bg = "#cba6f7", modifiers = ["bold"] }  # crust / mauve
+
+# Разделитель между секциями
+"ui.statusline.separator" = { fg = "#45475a", bg = "#181825" }          # surface1 / mantle

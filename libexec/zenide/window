@@ -1,0 +1,55 @@
+#!/usr/bin/env sh
+# Окно-контекст по РОЛИ: есть такое окно — переключиться, нет — создать.
+# Использование: zenide window git|files|search
+#
+# Регистр клавиши = смысл: строчная буква зовёт это (просто переключиться,
+# состояние окна не трогаем), заглавная — `zenide jump` (прыжок с контекстом
+# текущего файла hx). Смешивать два действия в одной клавише нельзя.
+#
+# Имя окна — часть контракта: по нему окна ищут остальные подкоманды
+# (`-t '=имя'`), а не по номеру (номера плывут из-за renumber-windows).
+# git/files названы ИНСТРУМЕНТОМ (видно в статусбаре, что там живёт), а
+# search — РОЛЬЮ: инструмент там заменяем, а имя окна должно быть стабильным.
+#
+set -u
+
+role="${1:-}"
+
+# cwd пейна, откуда позвали, и корень проекта (сессия = проект).
+# Для files корнем берём ИМЕННО session_path: cwd пейна бывает подпапкой или
+# домом, и YAZI_ROOT (граница плагина leave-guard) получался случайным.
+here="$(tmux display-message -p '#{pane_current_path}')"
+root="$(tmux display-message -p '#{session_path}')"
+[ -d "$root" ] || root="$here"
+
+case "$role" in
+git)
+    name="$ZENIDE_GIT_TUI"
+    tmux select-window -t "=$name" 2>/dev/null && exit 0
+    # lazygit на macOS кладёт конфиг в ~/Library/Application Support, если не
+    # сказать иначе; XDG_CONFIG_HOME он уважает (см. shell/parts/lazygit.sh).
+    if [ "$name" = lazygit ]; then
+        exec tmux new-window -n "$name" -c "$here" \
+            -e "XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-$HOME/.config}" "$name"
+    fi
+    exec tmux new-window -n "$name" -c "$here" "$name"
+    ;;
+files)
+    name="$ZENIDE_FILES"
+    tmux select-window -t "=$name" 2>/dev/null && exit 0
+    if [ "$name" = yazi ]; then
+        . "$ZENIDE_LIBEXEC/lib/yazi.sh"
+        yazi_start "$root" "$root"
+        exit $?
+    fi
+    exec tmux new-window -n "$name" -c "$root" -e "YAZI_ROOT=$root" "$name"
+    ;;
+search)
+    tmux select-window -t '=search' 2>/dev/null && exit 0
+    exec tmux new-window -n search -c "$here" "$ZENIDE_SEARCH"
+    ;;
+*)
+    printf 'zenide window: нужна роль — git | files | search\n' >&2
+    exit 2
+    ;;
+esac

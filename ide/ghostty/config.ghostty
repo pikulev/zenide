@@ -1,0 +1,44 @@
+theme = Monokai Pro Spectrum
+# ANSI-слот 4 «blue»: в Monokai Pro он оранжевый #fd9353 — белый текст на нём
+# нечитаем (селект в scooter и др. TUI, рисующие «blue» фоном).
+# Средне-серый dim из палитры сетапа: читаем и как фон, и как текст
+palette = 4=#69676c
+
+font-family = Menlo
+font-size = 16
+# ≈ lineHeight VS Code (его дефолт ~1.35 от кегля; голый Menlo в терминале ~1.2)
+adjust-cell-height = 15%
+# ≈ letterSpacing -0.45 из VS Code (доля ширины клетки Menlo)
+adjust-cell-width = -5%
+adjust-font-baseline = 1
+
+window-padding-x = 0
+window-padding-y = 0
+# остаток от деления высоты окна на клетку — раскидать поровну вверх/вниз,
+# а не копить полосой внизу под статусбаром tmux
+window-padding-balance = true
+
+# вкладки, сплиты и cwd переживают Cmd+Q и перезапуск после обновления.
+# `default` писал бы состояние только при форс-килле; процессы не восстановятся
+# ни при каком значении — для живых сессий есть tmux. Только macOS.
+window-save-state = always
+
+cursor-style = bar
+cursor-style-blink = false
+
+shell-integration = detect
+shell-integration-features = cursor,title
+cursor-click-to-move = true
+mouse-hide-while-typing = true
+
+copy-on-select = clipboard
+confirm-close-surface = true
+resize-overlay = after-first
+
+# Use left Option as terminal Alt/Meta for TUI apps:
+# WeeChat, Vim, tmux, Helix, etc.
+macos-option-as-alt = left
+
+# Cmd+S -> байт Ctrl-S (0x13): мышечная память VS Code, ловится биндом C-s в hx.
+# flow control в шелле отключён (stty -ixon в myconfig/shell/parts/unix.sh)
+keybind = super+s=text:\x13

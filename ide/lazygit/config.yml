@@ -1,0 +1,91 @@
+# lazygit config
+# Docs: https://github.com/jesseduffield/lazygit/blob/master/docs/Config.md
+#
+# This file lives in ~/.config/lazygit (not ~/Library/Application Support)
+# because ~/myconfig/shell/parts/lazygit.sh sets XDG_CONFIG_HOME=~/.config for
+# the lazygit process — consistent with gitui/tig.
+
+gui:
+  nerdFontsVersion: "3" # Nerd Font glyphs (file-type icons, branch, etc.)
+  showFileTree: true # tree layout for the files panel (toggle with `~`)
+  showRandomTip: false
+  # --- space savers ---
+  expandFocusedSidePanel: true # accordion: the focused side panel grows, others shrink
+  expandedSidePanelWeight: 4 # how much the focused panel expands (default 2 → taller)
+  sidePanelWidth: 0.28 # narrower left column → wider diff (default 0.3333)
+  showCommandLog: false # hide the bottom command-log panel → frees vertical space
+  showListFooter: false # drop the "5 of 20" footer row
+  authorColors:
+    "*": "#b4befe" # lavender
+  theme: # Catppuccin Mocha (official catppuccin/lazygit port)
+    activeBorderColor:
+      - "#89b4fa" # blue
+      - bold
+    inactiveBorderColor:
+      - "#a6adc8" # subtext0
+    searchingActiveBorderColor:
+      - "#f9e2af" # yellow
+    optionsTextColor:
+      - "#89b4fa" # blue
+    selectedLineBgColor:
+      - "#313244" # surface0
+    inactiveViewSelectedLineBgColor:
+      - "#6c7086" # overlay0
+    cherryPickedCommitFgColor:
+      - "#89b4fa" # blue
+    cherryPickedCommitBgColor:
+      - "#45475a" # surface1
+    markedBaseCommitFgColor:
+      - "#89b4fa" # blue
+    markedBaseCommitBgColor:
+      - "#f9e2af" # yellow
+    unstagedChangesColor:
+      - "#f38ba8" # red
+    defaultFgColor:
+      - "#cdd6f4" # text
+git:
+  # НЕ фетчить в фоне: на больших репо (напр. web, 4300 веток) автофетч каждые
+  # 60с плодит .lock-файлы и гонки git-процессов → вечные «cannot lock ref /
+  # Unable to create …lock: File exists». Фетч руками по `f`. См. также
+  # fetch.prune=true в config/git/config (чистит устаревшие remote-tracking рефы).
+  autoFetch: false
+  diffRenderers:
+    - colorArg: always
+      # delta: подсветка синтаксиса + посимвольный highlight изменённых подстрок.
+      # --paging=never обязателен (пейджер внутри lazygit), тема — Monokai (bat).
+      command: delta --dark --paging=never --line-numbers --syntax-theme="Monokai Extended"
+os:
+  # `e` отдаёт файл в УЖЕ работающий hx текущей tmux-сессии: `zenide open` сам
+  # находит пейн с hx и переключает на его окно. Один инстанс редактора на
+  # проект — в этом вся модель. Вне tmux (обычный `lg`) моста нет, поэтому
+  # блокирующий hx прямо поверх lazygit; :q вернёт обратно.
+  edit: >-
+    if [ -n "$TMUX" ]; then
+
+
+      "${ZENIDE_ROOT:-$HOME/.config/zenide}/bin/zenide" open "{{filename}}";
+    else
+
+
+      hx -- {{filename}};
+    fi
+  editAtLine: >-
+    if [ -n "$TMUX" ]; then
+
+
+      "${ZENIDE_ROOT:-$HOME/.config/zenide}/bin/zenide" open "{{filename}}" "{{line}}";
+    else
+
+
+      hx -- {{filename}}:{{line}};
+    fi
+  # блокирующие правки (E «edit hunk» в staging и т.п.): lazygit пишет патч во
+  # временный файл и ЖДЁТ выхода редактора — слать в работающий hx нельзя
+  # (мост возвращает управление сразу, и lazygit прочитал бы патч неизменённым),
+  # поэтому свежий hx поверх lazygit в том же пейне; :wq вернёт в lazygit.
+  editAtLineAndWait: hx -- {{filename}}:{{line}}
+  editInTerminal: false
+disableStartupPopups: true # skip the intro popup on launch
+# не спрашивать «Press enter to return» после сабпроцессов (E edit hunk → hx):
+# вышел из редактора — сразу обратно в lazygit
+promptToReturnFromSubprocess: false

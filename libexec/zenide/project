@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# Фаззи-переключатель проектов: одна tmux-сессия = один проект.
+# Вызов без аргументов — fzf по каталогам проектов.
+# Вызов с путём — сразу в этот проект (для скриптов/алиасов).
+# `--list` — только напечатать список, без fzf (для тестов и отладки).
+#
+# Строка ниже — источник для шпаргалки C-Space ? (`zenide keys` грепает `# keys:`).
+# keys: Enter проект → сессия (создать или переключиться) · Esc отмена
+
+# ── откуда берутся проекты ─────────────────────────────
+# Дефолт: обычные места, которые есть на машине. Профиль перебивает целиком —
+# ядро не должно знать ничьих путей.
+#   roots       — каталоги, где ЛЕЖАТ проекты (в список идут их подкаталоги)
+#   standalone  — отдельные проекты, попадающие в список САМИ (не их дети)
+#   containers  — контейнеры мультирепо: сами НЕ проекты, их дети — да
+roots=() standalone=() containers=()
+for d in "$HOME/code" "$HOME/projects" "$HOME/src" "$HOME/dev"; do
+    [[ -d "$d" ]] && roots+=("$d")
+done
+[[ ${#roots[@]} -eq 0 ]] && roots=("$HOME")
+
+# shellcheck source=/dev/null
+[[ -r "${ZENIDE_PROFILE:-}/projects.conf" ]] && . "$ZENIDE_PROFILE/projects.conf"
+
+# find падает на пустом списке путей → подставляем только непустые
+candidates() {
+    {
+        [[ ${#roots[@]}      -gt 0 ]] && find "${roots[@]}"      -mindepth 1 -maxdepth 1 -type d 2>/dev/null
+        [[ ${#containers[@]} -gt 0 ]] && find "${containers[@]}" -mindepth 1 -maxdepth 1 -type d 2>/dev/null
+        [[ ${#standalone[@]} -gt 0 ]] && printf '%s\n' "${standalone[@]}"
+    } | sort -u
+}
+
+if [[ "${1:-}" == --list ]]; then
+    candidates
+    exit 0
+fi
+
+if [[ $# -eq 1 ]]; then
+    selected="$1"
+else
+    selected=$(candidates | fzf --prompt="project ❯ ")
+fi
+
+[[ -z "$selected" ]] && exit 0
+
+selected="$(cd "$selected" && pwd -P)" || exit 1
+
+# Идентичность проекта — абсолютный путь. Красивое имя лишь подпись:
+# одинаковые basename и foo.bar/foo_bar не должны склеивать проекты.
+session=""
+while IFS=$'\t' read -r sid path; do
+    if [[ "$path" == "$selected" ]]; then session="$sid"; break; fi
+done < <(tmux list-sessions -F $'#{session_id}\t#{session_path}' 2>/dev/null)
+if [[ -z "$session" ]]; then
+    name=$(basename "$selected" | tr '.:' '__')
+    parent=$(dirname "$selected")
+    for c in "${containers[@]}"; do
+        [[ "$parent" == "$c" ]] && name="$(basename "$c" | tr '.:' '__')_${name}"
+    done
+    base="$name" n=1
+    while tmux has-session -t "=$name" 2>/dev/null; do
+        n=$((n + 1))
+        name="$base-$n"
+    done
+    session="$(tmux new-session -dP -F '#{session_id}' -s "$name" -c "$selected")" || exit 1
+fi
+
+if [[ -n "${TMUX:-}" ]]; then
+    tmux switch-client -t "$session"
+else
+    tmux attach -t "$session"
+fi

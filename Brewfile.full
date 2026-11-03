@@ -1,0 +1,42 @@
+# ЛИЧНЫЙ стек поверх ядра: альтернативы слотов, LSP, рантаймы, прочие тулы.
+#   brew bundle --file=Brewfile && brew bundle --file=Brewfile.full
+# Ядро — Brewfile. Здесь нет ничего, без чего zenide перестанет работать.
+
+# ── альтернативные реализации слотов ───────────────────
+# Переключаются в profile/modules.conf (git_tui=…), а не правкой кода.
+brew "gitui"
+brew "tig"
+
+# ── редакторы и диффы ──────────────────────────────────
+brew "neovim"         # запасной редактор (attic/nvim — один файл, без плагинов)
+brew "difftastic"     # дифф с учётом синтаксиса: difft --check-only
+brew "eza"            # ls с деревом и git-статусом
+
+# ── sshfs для плагина sshfs.yazi (бинд M в yazi) ───────
+# FUSE-T — безкекстная реализация FUSE; тап требует brew trust (bootstrap.sh
+# делает) и sudo-пароль при установке. После установки ghostty нужен доступ
+# «Сетевые тома» (Privacy & Security → Files and Folders) + перезапуск.
+tap  "macos-fuse-t/cask"
+cask "fuse-t"
+cask "fuse-t-sshfs"
+
+# ── просмотр и утилиты ─────────────────────────────────
+tap  "jannis-baum/tap"
+brew "jannis-baum/tap/vivify"   # markdown-превью в браузере (hx Space m): mermaid, katex, live-reload
+brew "jless"          # JSON/YAML с фолдингом (yazi O)
+brew "slumber"        # TUI HTTP-клиент
+brew "sevenzip"       # 7zz — распаковка архивов в yazi
+brew "wireshark"      # tshark — движок shell/bin/pcap2flows
+
+# ── LSP и линтеры вне npm ──────────────────────────────
+brew "marksman"       # markdown LSP
+brew "shellcheck"     # им же гоняются tests/t-lint.sh
+brew "shfmt"
+brew "clang-format"
+
+# ── рантаймы ───────────────────────────────────────────
+# Версии и языковые CLI — в ide/mise/config.toml, не здесь. Правило: рантайм
+# или тул, который ставится из npm/pypi/cargo, — mise; бинарник системного
+# уровня (tmux, ghostty) — brew. Так брать нечего из двух менеджеров сразу.
+brew "mise"           # node/pnpm/bun + LSP-стек, см. ide/mise/config.toml
+brew "uv"             # venv и `uv run` в проектах (ty/ruff ставит mise)
