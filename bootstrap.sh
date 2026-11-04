@@ -74,10 +74,10 @@ mkdir -p ~/.ssh/sockets && chmod 700 ~/.ssh/sockets
 # bootstrap.sh и есть согласие. Без флага шаг печатал план среди логов brew
 # и уходил, не поставив ни одного симлинка, — на чистой машине «одной
 # командой» не срабатывало, а doctor в конце краснел.
-# `--with mise` — поимённо, потому что слой `global`: в `--with all` такое не
-# входит, а без симлинка ~/.config/mise шагу ниже нечего устанавливать.
-step "установка zenide (./install.sh --apply --with mise)"
-./install.sh --apply --with mise
+# Личная полная установка включает и глобальные слои: Git, рантаймы и
+# форматирование. Публичный install.sh по-прежнему выбирает их только явно.
+step "установка zenide (./install.sh --apply --with all,git,mise,prettier)"
+./install.sh --apply --with all,git,mise,prettier
 
 # ── Рантаймы и LSP (mise) ───────────────────────────────────────────────
 # ПОСЛЕ install.sh: список тулов лежит в ide/mise/config.toml, а mise читает
@@ -100,16 +100,14 @@ fi
 
 # ── ~/.zshrc бутстрап ───────────────────────────────────────────────────
 step "~/.zshrc"
-if ! grep -q 'SHELL_CONFIG_ROOT' ~/.zshrc 2>/dev/null; then
-    printf 'SHELL_CONFIG_ROOT=~/myconfig/shell\n\nsource $SHELL_CONFIG_ROOT/zshrc.sh\n' >> ~/.zshrc
+if ! grep -q '^SHELL_CONFIG_ROOT=' "$HOME/.zshrc" 2>/dev/null; then
+    printf '\nSHELL_CONFIG_ROOT="$HOME/.config/zenide/shell"\n\nsource "$SHELL_CONFIG_ROOT/zshrc.sh"\n' >> "$HOME/.zshrc"
     echo "  бутстрап дописан"
-elif grep -q 'SHELL_CONFIG_ROOT=.*/sh$' ~/.zshrc 2>/dev/null; then
-    # каталог sh/ переименован в shell/ — перевести старую строку, иначе шелл
-    # будет падать на каждом старте
-    sed -i '' 's|\(SHELL_CONFIG_ROOT=.*\)/sh$|\1/shell|' ~/.zshrc
-    echo "  путь обновлён: sh → shell"
 else
-    echo "  уже настроен"
+    # Якорь установлен выше и не зависит от имени каталога клона. Остальные
+    # строки пользовательского .zshrc остаются на месте.
+    sed -i '' 's|^SHELL_CONFIG_ROOT=.*$|SHELL_CONFIG_ROOT="$HOME/.config/zenide/shell"|' "$HOME/.zshrc"
+    echo "  путь шелла: ~/.config/zenide/shell"
 fi
 # Затенение конфигов (~/.gitconfig, ~/.tmux.conf) проверяет `zenide doctor`,
 # раздел «затенение» — там же сказано, чем именно это грозит. Здесь не дублируем:
