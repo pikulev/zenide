@@ -77,7 +77,7 @@ mkdir -p ~/.ssh/sockets && chmod 700 ~/.ssh/sockets
 # Личная полная установка включает и глобальные слои: Git, рантаймы и
 # форматирование. Публичный install.sh по-прежнему выбирает их только явно.
 step "установка zenide (./install.sh --apply --with all,git,mise,prettier)"
-./install.sh --apply --with all,git,mise,prettier
+./install.sh --apply --with all,git,mise,prettier || exit 1
 
 # ── Рантаймы и LSP (mise) ───────────────────────────────────────────────
 # ПОСЛЕ install.sh: список тулов лежит в ide/mise/config.toml, а mise читает
@@ -100,14 +100,32 @@ fi
 
 # ── ~/.zshrc бутстрап ───────────────────────────────────────────────────
 step "~/.zshrc"
-if ! grep -q '^SHELL_CONFIG_ROOT=' "$HOME/.zshrc" 2>/dev/null; then
-    printf '\nSHELL_CONFIG_ROOT="$HOME/.config/zenide/shell"\n\nsource "$SHELL_CONFIG_ROOT/zshrc.sh"\n' >> "$HOME/.zshrc"
+zshrc="$HOME/.zshrc"
+# BSD sed -i не редактирует симлинки. Находим цель, сохраняя всю цепочку
+# ссылок (в том числе относительных) менеджера дотфайлов.
+if [ -L "$zshrc" ] && [ ! -e "$zshrc" ]; then
+    printf '  ошибка: битая или циклическая ссылка %s\n' "$zshrc" >&2
+    exit 1
+fi
+while [ -L "$zshrc" ]; do
+    target="$(readlink "$zshrc")" || exit 1
+    case "$target" in
+        /*) zshrc="$target" ;;
+        *) zshrc="$(dirname "$zshrc")/$target" ;;
+    esac
+done
+if [ -e "$zshrc" ] && { [ ! -f "$zshrc" ] || [ ! -r "$zshrc" ]; }; then
+    printf '  ошибка: %s не является доступным для чтения файлом\n' "$zshrc" >&2
+    exit 1
+fi
+if ! grep -Eq '^[[:space:]]*(export[[:space:]]+)?SHELL_CONFIG_ROOT=' "$zshrc" 2>/dev/null; then
+    printf '\nSHELL_CONFIG_ROOT="${XDG_CONFIG_HOME:-$HOME/.config}/zenide/shell"\n\nsource "$SHELL_CONFIG_ROOT/zshrc.sh"\n' >> "$zshrc" || exit 1
     echo "  бутстрап дописан"
 else
     # Якорь установлен выше и не зависит от имени каталога клона. Остальные
-    # строки пользовательского .zshrc остаются на месте.
-    sed -i '' 's|^SHELL_CONFIG_ROOT=.*$|SHELL_CONFIG_ROOT="$HOME/.config/zenide/shell"|' "$HOME/.zshrc"
-    echo "  путь шелла: ~/.config/zenide/shell"
+    # строки, отступ и export пользовательского .zshrc остаются на месте.
+    sed -E -i '' 's|^([[:space:]]*(export[[:space:]]+)?)SHELL_CONFIG_ROOT=.*$|\1SHELL_CONFIG_ROOT="${XDG_CONFIG_HOME:-$HOME/.config}/zenide/shell"|' "$zshrc" || exit 1
+    echo "  путь шелла: ${XDG_CONFIG_HOME:-$HOME/.config}/zenide/shell"
 fi
 # Затенение конфигов (~/.gitconfig, ~/.tmux.conf) проверяет `zenide doctor`,
 # раздел «затенение» — там же сказано, чем именно это грозит. Здесь не дублируем:

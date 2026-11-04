@@ -112,8 +112,9 @@ git clone git@github.com:pikulev/zenide.git ~/myconfig
   и явно выбранные глобальные слои Git, mise и prettier);
 - рантаймы и LSP: один `mise install` по `ide/mise/config.toml` (node двух
   версий, pnpm, bun, LSP web-стек, prettier, ruff, ty) + `mise reshim`;
-- `~/.zshrc`-бутстрап через `~/.config/zenide/shell`: имя каталога клона
-  не важно, старый `SHELL_CONFIG_ROOT` обновляется, остальные строки сохраняются.
+- `~/.zshrc`-бутстрап через `${XDG_CONFIG_HOME:-$HOME/.config}/zenide/shell`:
+  имя каталога клона не важно, старый `SHELL_CONFIG_ROOT` обновляется,
+  остальные строки и симлинк `.zshrc` сохраняются.
 
 Сетевые и опциональные шаги не валят прогон — падение печатается как `⚠`.
 
