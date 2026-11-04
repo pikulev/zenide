@@ -1,0 +1,43 @@
+/* Monokai Pro Spectrum. Скопируй в doctor.tcss.local для личной правки. */
+$zenide-background: #222222;
+$zenide-foreground: #f7f1ff;
+$zenide-primary: #525053;
+$zenide-text-muted: #69676c;
+$zenide-error: #fc618d;
+$zenide-warning: #fce566;
+
+Screen { background: $zenide-background; color: $zenide-foreground; }
+#heading, #summary { height: auto; padding: 0 1; }
+#summary { color: $zenide-text-muted; }
+#filters { height: 3; }
+#search { width: 1fr; border: tall $zenide-primary; }
+#problems { width: auto; border: none; padding: 1; }
+#body { height: 1fr; }
+#checks { width: 1fr; height: 1fr; }
+#details { width: 1fr; height: 1fr; border-left: solid $zenide-primary; padding: 0 1; }
+#detail-title { text-style: bold; margin-bottom: 1; }
+#detail-title.error { color: $zenide-error; }
+#detail-title.warn { color: $zenide-warning; }
+#detail, #hint, #file { height: auto; margin-bottom: 1; }
+#file { color: $zenide-text-muted; }
+#actions { height: 3; }
+Button { border: none; background: $zenide-primary; color: $zenide-foreground; margin-right: 1; }
+Button:hover { background: $zenide-primary; }
+Button:focus { text-style: bold; background: $zenide-primary; }
+DataTable { background: $zenide-background; }
+DataTable > .datatable--header { background: $zenide-primary; color: $zenide-foreground; }
+DataTable > .datatable--cursor { background: $zenide-primary; color: $zenide-foreground; }
+DataTable > .datatable--hover { background: $zenide-primary; }
+Footer { background: $zenide-background; }
+FooterKey { background: $zenide-background; }
+FooterKey > .footer-key--key { background: $zenide-primary; color: $zenide-foreground; }
+Checkbox > .toggle--button { color: $zenide-foreground; background: $zenide-primary; }
+Input:focus { border: tall $zenide-primary; }
+Input > .input--cursor { background: $zenide-foreground; color: $zenide-background; }
+Input > .input--placeholder { color: $zenide-text-muted; }
+Input > .input--selection { background: $zenide-primary; }
+Checkbox:focus { background: $zenide-primary; }
+VerticalScroll { scrollbar-color: $zenide-primary; scrollbar-background: $zenide-background; }
+.narrow #body { layout: vertical; }
+.narrow #checks { width: 100%; height: 1fr; }
+.narrow #details { width: 100%; height: 1fr; border-left: none; border-top: solid $zenide-primary; }
