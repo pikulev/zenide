@@ -108,11 +108,13 @@ git clone git@github.com:pikulev/zenide.git ~/myconfig
 - rust: rustup + компонент `rust-analyzer` (единственный рантайм НЕ под mise —
   тулчейны и компоненты умеет только он);
 - fzf key-bindings + completion;
-- `./install.sh --apply --with mise` (симлинки, профиль и глобальный конфиг
-  mise — поимённо, потому что слой `global`);
+- `./install.sh --apply --with all,git,mise,prettier` (все конфиги, профиль
+  и явно выбранные глобальные слои Git, mise и prettier);
 - рантаймы и LSP: один `mise install` по `ide/mise/config.toml` (node двух
   версий, pnpm, bun, LSP web-стек, prettier, ruff, ty) + `mise reshim`;
-- `~/.zshrc`-бутстрап.
+- `~/.zshrc`-бутстрап через `${XDG_CONFIG_HOME:-$HOME/.config}/zenide/shell`:
+  имя каталога клона не важно, старый `SHELL_CONFIG_ROOT` обновляется,
+  остальные строки и симлинк `.zshrc` сохраняются.
 
 Сетевые и опциональные шаги не валят прогон — падение печатается как `⚠`.
 

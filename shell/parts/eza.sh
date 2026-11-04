@@ -1,1 +1,1 @@
-alias -g ls=eza
+alias ls=eza
