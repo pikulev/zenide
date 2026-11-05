@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+# Маршруты macOS к хостам из профиля: myroutes [--config ФАЙЛ] [ХОСТ…].
+set -uo pipefail
+
+usage() {
+    cat <<'EOF'
+myroutes [--config ФАЙЛ] [ХОСТ…]
+
+Без аргументов читает myroutes.local или myroutes.conf из активного профиля.
+В конфиге один хост или IP на строку; пустые строки и # комментарии допустимы.
+Хосты в аргументах заменяют список из конфига. URL и порты не поддерживаются.
+
+Показывает все адреса системного DNS и локальные маршруты к ним.
+DNS может обращаться в сеть; ping, traceroute и внешние API не вызываются.
+Туннель — только первый участок пути: выход VPN/прокси здесь не виден.
+Проверка маршрута не проверяет доступность сайта и правила отдельных приложений.
+Коды выхода: 0 — маршруты прочитаны, 1 — есть ошибки, 2 — ошибка аргументов/конфига.
+EOF
+}
+
+config=''
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -h|--help) usage; exit 0 ;;
+        --config)
+            [ $# -ge 2 ] && [ -n "$2" ] || { printf 'myroutes: нужен путь после --config\n' >&2; exit 2; }
+            config=$2; shift 2 ;;
+        --) shift; break ;;
+        -*) printf 'myroutes: неизвестный аргумент: %s\n' "$1" >&2; exit 2 ;;
+        *) break ;;
+    esac
+done
+
+hosts=("$@")
+if [ ${#hosts[@]} -eq 0 ]; then
+    if [ -z "$config" ]; then
+        profile=${ZENIDE_PROFILE:-${XDG_CONFIG_HOME:-$HOME/.config}/zenide-profile}
+        if [ -z "${ZENIDE_PROFILE:-}" ] && [ ! -d "$profile" ]; then
+            root=${ZENIDE_ROOT:-$(cd "$(dirname "$0")/../.." && pwd -P)}
+            profile=$root/profile
+        fi
+        config=$profile/myroutes.conf
+        [ ! -f "$profile/myroutes.local" ] || config=$profile/myroutes.local
+    fi
+    [ -r "$config" ] || { printf 'myroutes: не могу прочитать %s\n' "$config" >&2; exit 2; }
+    while IFS= read -r line || [ -n "$line" ]; do
+        line=${line%$'\r'}
+        read -r host extra <<< "${line%%#*}"
+        [ -n "$host" ] || continue
+        [ -z "$extra" ] || { printf 'myroutes: нужен один хост на строку: %s\n' "$line" >&2; exit 2; }
+        hosts+=("$host")
+    done < "$config"
+fi
+[ ${#hosts[@]} -gt 0 ] || { printf 'myroutes: список хостов пуст\n' >&2; exit 2; }
+
+# Проверяем весь список до DNS: конфиг — данные, а не shell-код или параметры route.
+for host in "${hosts[@]}"; do
+    case "$host" in
+        ''|-*|*[!a-zA-Z0-9._:%-]*)
+            printf 'myroutes: нужен хост или IP без URL/порта: %s\n' "$host" >&2; exit 2 ;;
+    esac
+    case "$host" in
+        *:*)
+            # Двоеточие разрешено только в IPv6 (не host:port).
+            [[ "$host" == *:*:* ]] || { printf 'myroutes: порт не поддерживается: %s\n' "$host" >&2; exit 2; }
+            ;;
+    esac
+done
+
+for tool in dscacheutil route perl column; do
+    command -v "$tool" >/dev/null 2>&1 || { printf 'myroutes: нужна команда macOS: %s\n' "$tool" >&2; exit 1; }
+done
+
+# Ограничиваем каждое ожидание; alarm переживает exec и завершает саму команду.
+bounded() { perl -e 'alarm 5; exec @ARGV; exit 127' "$@"; }
+
+report() {
+    local failed=0 host addresses lookup ip family details iface gateway kind
+    printf 'ХОСТ\tIP\tИНТЕРФЕЙС\tШЛЮЗ\tМАРШРУТ\n'
+    for host in "${hosts[@]}"; do
+        case "$host" in
+            *:*) addresses=$host ;;
+            *)
+                if [[ "$host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                    addresses=$host
+                else
+                    if ! lookup=$(bounded dscacheutil -q host -a name "$host" 2>/dev/null); then
+                        printf '%s\t—\t—\t—\tошибка/таймаут DNS\n' "$host"
+                        failed=1; continue
+                    fi
+                    addresses=$(printf '%s\n' "$lookup" | awk '/^(ip_address|ipv6_address): / { if (!seen[$2]++) print $2 }')
+                fi ;;
+        esac
+        if [ -z "$addresses" ]; then
+            printf '%s\t—\t—\t—\tDNS: адресов нет\n' "$host"
+            failed=1; continue
+        fi
+        while IFS= read -r ip; do
+            family=-inet
+            case "$ip" in *:*) family=-inet6 ;; esac
+            if ! details=$(bounded route -n get "$family" "$ip" 2>&1); then
+                printf '%s\t%s\t—\t—\tмаршрут недоступен\n' "$host" "$ip"
+                printf 'myroutes: %s (%s): %s\n' "$host" "$ip" "$details" >&2
+                failed=1; continue
+            fi
+            iface=$(printf '%s\n' "$details" | awk '$1 == "interface:" { print $2; exit }')
+            # macOS route иногда возвращает 0 даже при «not in table».
+            if [ -z "$iface" ]; then
+                kind='маршрут не прочитан'
+                case "$details" in *'not in table'*) kind='нет маршрута' ;; esac
+                printf '%s\t%s\t—\t—\t%s\n' "$host" "$ip" "$kind"
+                printf 'myroutes: %s (%s): %s\n' "$host" "$ip" "$details" >&2
+                failed=1; continue
+            fi
+            gateway=$(printf '%s\n' "$details" | awk '$1 == "gateway:" { print $2; exit }')
+            case "$iface" in
+                utun*|tun*|tap*|ppp*|ipsec*) kind=туннель ;;
+                lo*) kind=локальный ;;
+                *) kind='интерфейс' ;;
+            esac
+            case "$details" in
+                *REJECT*|*BLACKHOLE*) kind=блокировка; failed=1 ;;
+            esac
+            printf '%s\t%s\t%s\t%s\t%s\n' "$host" "$ip" "${iface:-—}" "${gateway:-напрямую}" "$kind"
+        done <<< "$addresses"
+    done
+    return "$failed"
+}
+
+printf 'Локальные маршруты; доступность хостов и выход из туннеля не проверяются.\n'
+report | column -t -s $'\t'

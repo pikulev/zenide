@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Геоданные в JSON: mygeo [IP]; без аргумента — текущий внешний IP.
+exec curl -fsS --connect-timeout 3 --max-time 5 "https://json.geoiplookup.io/${1:-}"

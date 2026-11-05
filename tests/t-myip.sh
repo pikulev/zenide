@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# myip: простой запрос ipinfo; регрессии фона статусбара без сети.
+# myip: простой запрос ifconfig.me; регрессии фона статусбара без сети.
 set -u
 . "$(dirname "$0")/lib.sh"
 trap t_teardown EXIT
@@ -9,11 +9,11 @@ mkdir -p "$FIX/bin"
 cat > "$FIX/bin/curl" <<'EOF'
 #!/bin/sh
 for url do :; done
-[ "$url" = https://ipinfo.io/json ] || exit 2
-printf '{"ip":"192.0.2.1","country":"NL"}\n'
+[ "$url" = https://ifconfig.me/ip ] || exit 2
+printf '192.0.2.1'
 EOF
 chmod +x "$FIX/bin/curl"
-assert_eq "myip возвращает JSON ipinfo" "$(PATH="$FIX/bin:$PATH" "$REPO_ROOT/shell/bin/myip")" '{"ip":"192.0.2.1","country":"NL"}'
+assert_eq "myip возвращает внешний IP" "$(PATH="$FIX/bin:$PATH" "$REPO_ROOT/shell/bin/myip")" '192.0.2.1'
 
 zt set -g status-bg colour236
 t_load_conf
