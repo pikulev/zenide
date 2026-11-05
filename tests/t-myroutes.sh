@@ -49,6 +49,9 @@ assert_has 'есть IPv6' "$out" 2001:db8::1
 assert_has 'виден туннель' "$out" туннель
 assert_has 'виден шлюз' "$out" 'fe80::1%utun7'
 assert_has 'loopback локальный' "$out" локальный
+assert_eq 'все IPv4 идут перед IPv6 с сохранением порядка хостов' \
+    "$(printf '%s\n' "$out" | awk 'NR > 2 { print $2 }')" \
+    $'192.0.2.1\n127.0.0.1\n2001:db8::1'
 assert_eq 'одинаковые ответы DNS не дублируют маршрут' "$(grep -c 'route -n get -inet 192.0.2.1$' "$ROUTES_CALLS")" 1
 assert_eq 'IP-литерал не запускает DNS' "$(grep -c '^dns ' "$ROUTES_CALLS")" 1
 
@@ -61,6 +64,9 @@ assert_has 'ошибка чтения маршрута' "$out" 'маршрут �
 assert_has 'причина route сохранена' "$(cat "$FIX/errors")" 'not in table'
 assert_has 'REJECT не показан как рабочий маршрут' "$out" блокировка
 assert_has 'после ошибок проверен следующий хост' "$out" 127.0.0.1
+assert_eq 'ошибки DNS без адреса идут после маршрутов' \
+    "$(printf '%s\n' "$out" | awk 'NR > 2 { print $1 }')" \
+    $'192.0.2.2\n192.0.2.3\n192.0.2.4\n127.0.0.1\nmissing.test\nfail.test'
 
 out=$("$REPO_ROOT/shell/bin/myroutes" slow.test 127.0.0.1 2>/dev/null)
 assert_eq 'зависший DNS ограничен таймаутом' "$?" 1
