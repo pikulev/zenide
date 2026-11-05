@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Внешний IP и геоданные от ipinfo.io.
+exec curl -fsS --connect-timeout 3 --max-time 5 https://ipinfo.io/json

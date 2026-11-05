@@ -4,4 +4,5 @@ setopt PROMPT_CR
 setopt PROMPT_SP
 export PROMPT_EOL_MARK=""
 
-alias myip='curl ifconfig.me'
+# myip теперь исполняемая команда из shell/bin; снимаем старый алиас при source.
+unalias myip 2>/dev/null || true
