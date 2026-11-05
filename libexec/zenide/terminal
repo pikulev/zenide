@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Одноразовый терминал с прокруткой внутри попапа.
+# keys: колесо/трекпад — прокрутка · C-Space [ — история · q — назад · exit/C-d — закрыть
+set -eu
+
+# Настройки берём у внешнего сервера; полный конфиг сюда не грузим:
+# его хуки и окна относятся к проекту, а не к временному терминалу.
+shell="$(tmux show-options -gv default-shell)"
+history="$(tmux show-options -gv history-limit)"
+mode_style="$(tmux show-options -gwv mode-style)"
+run="$(mktemp -d "${TMPDIR:-/tmp}/zenide-terminal.XXXXXX")"
+socket="$run/tmux"
+cleanup() {
+    tmux -S "$socket" kill-server 2>/dev/null || true
+    rm -rf "$run"
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# Отдельный сокет не добавляет сессию в список проектов. В самом шелле
+# сохраняем внешний TMUX/TMUX_PANE: zenide open и другие команды моста
+# должны по-прежнему обращаться к проекту за попапом.
+env -u TMUX tmux -S "$socket" -f "$ZENIDE_ROOT/ide/tmux/popup.conf" \
+    set-option -g history-limit "$history" \; \
+    set-option -gw mode-style "$mode_style" \; \
+    new-session -s terminal -c "$PWD" \
+    env "TMUX=${TMUX:-}" "TMUX_PANE=${TMUX_PANE:-}" "$shell" -l
